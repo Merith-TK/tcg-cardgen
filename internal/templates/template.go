@@ -13,7 +13,7 @@ import (
 
 // Embed built-in templates into the binary
 //
-//go:embed builtin/*
+//go:embed templates/*
 var builtinTemplates embed.FS
 
 // Template represents a card template definition
@@ -136,10 +136,10 @@ func (m *Manager) findAndLoadTemplate(tcg, cardstyle string) (*Template, error) 
 	// 2. User cardstyles: $HOME/.tcg-cardgen/cardstyles/tcg/cardstyle.yaml
 	// 3. User cardstyles: $HOME/.tcg-cardgen/cardstyles/cardstyle.yaml (with TCG metadata check)
 	// 4. Legacy custom template dir: custom-dir/tcg/cardstyle.yaml (for backwards compatibility)
-	// 5. Embedded templates: builtin/tcg/cardstyle.yaml (final fallback)
+	// 5. Embedded templates: templates/tcg/cardstyle.yaml (final fallback)
 
 	// 1. Workspace templates directory (project-specific cardstyles)
-	workspacePath := filepath.Join("templates", tcg, cardstyle+".yaml")
+	workspacePath := filepath.Join(".tcg-cardstyles", tcg, cardstyle+".yaml")
 	if template, err := m.loadAndProcessTemplate(workspacePath); err == nil {
 		return template, nil
 	}
@@ -175,7 +175,7 @@ func (m *Manager) findAndLoadTemplate(tcg, cardstyle string) (*Template, error) 
 
 // loadBuiltinTemplate loads a template from embedded builtin templates
 func (m *Manager) loadBuiltinTemplate(tcg, cardstyle string) (*Template, error) {
-	builtinPath := fmt.Sprintf("builtin/%s/%s.yaml", tcg, cardstyle)
+	builtinPath := fmt.Sprintf("templates/%s/%s.yaml", tcg, cardstyle)
 
 	data, err := builtinTemplates.ReadFile(builtinPath)
 	if err != nil {
@@ -188,9 +188,7 @@ func (m *Manager) loadBuiltinTemplate(tcg, cardstyle string) (*Template, error) 
 	}
 
 	// Set template directory for builtin templates
-	template.TemplateDir = fmt.Sprintf("builtin/%s", tcg)
-
-	// Handle inheritance for builtin templates
+	template.TemplateDir = fmt.Sprintf("templates/%s", tcg) // Handle inheritance for builtin templates
 	if template.Extends != "" {
 		// For builtin templates, resolve relative extends within builtin
 		baseTemplate, err := m.resolveBuiltinBaseTemplate(template.Extends, template.TemplateDir)
@@ -216,8 +214,8 @@ func (m *Manager) resolveBuiltinBaseTemplate(extendsPath, currentDir string) (*T
 	}
 
 	// Ensure it's still a builtin path
-	if !strings.HasPrefix(basePath, "builtin/") {
-		basePath = filepath.Join("builtin", basePath)
+	if !strings.HasPrefix(basePath, "templates/") {
+		basePath = filepath.Join("templates", basePath)
 	}
 
 	data, err := builtinTemplates.ReadFile(basePath)
@@ -582,8 +580,8 @@ func (m *Manager) ListAvailableCardstyles() ([]CardStyleInfo, error) {
 func (m *Manager) discoverEmbeddedCardstyles() ([]CardStyleInfo, error) {
 	var cardstyles []CardStyleInfo
 
-	// Read the builtin directory from embedded filesystem
-	entries, err := builtinTemplates.ReadDir("builtin")
+	// Read the templates directory from embedded filesystem
+	entries, err := builtinTemplates.ReadDir("templates")
 	if err != nil {
 		return nil, err
 	}
@@ -594,7 +592,7 @@ func (m *Manager) discoverEmbeddedCardstyles() ([]CardStyleInfo, error) {
 		}
 
 		tcgName := entry.Name()
-		tcgPath := "builtin/" + tcgName
+		tcgPath := "templates/" + tcgName
 
 		// Read cardstyle files in this TCG directory
 		cardstyleEntries, err := builtinTemplates.ReadDir(tcgPath)
@@ -662,7 +660,7 @@ func (m *Manager) loadEmbeddedTemplateInfo(embeddedPath string) (*Template, erro
 func (m *Manager) discoverWorkspaceCardstyles() ([]CardStyleInfo, error) {
 	var cardstyles []CardStyleInfo
 
-	templatesDir := "templates"
+	templatesDir := ".tcg-cardstyles"
 	tcgDirs, err := os.ReadDir(templatesDir)
 	if err != nil {
 		return nil, err

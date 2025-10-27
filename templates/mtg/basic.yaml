@@ -84,7 +84,7 @@ layers:
     role: "type_line"
     type: "text"
     content: "{{card.type}}"
-    region: { x: 60, y: 580, width: 630, height: 30 }
+    region: { x: 60, y: 590, width: 630, height: 30 }
     font:
       family: "{{style_tokens.font_text}}"
       size: "{{mtg.font_size.type_line}}"
