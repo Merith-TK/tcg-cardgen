@@ -57,12 +57,54 @@
 #### Corrections Made:
 - Fixed architecture example: `card.body` is markdown content, not frontmatter field
 - Clarified: Markdown headers (# Title) should NOT be rendered in card body for MTG cards
+- **NEW**: Reviewed GPT feedback on cardstyle format - excellent suggestions for universal base spec
+- **NEW**: Need to refactor fields to be more TCG-specific (mtg.mana_cost vs card.mana_cost)
+- **NEW**: Implement universal base cardstyle that other TCGs can extend
+- **NEW**: Add style_tokens, layer roles, and conditional rendering
+- **REFINEMENT**: Cardstyles should validate against their own TCG, not universal
+- **REFINEMENT**: Cross-TCG icon support (mtg.mana_red works in pokemon cardstyle)
+- **REFINEMENT**: Cardstyle-defined icon aliases (tcg.cost_red = mtg.mana_red = pkm.energy_red)
+
+#### Architecture Refinements:
+1. **TCG-Specific Validation**: Pokemon cardstyle requires pokemon metadata, not universal
+2. **Cross-TCG Icon Support**: Any cardstyle can use any TCG's icons
+3. **Icon Aliases**: Cardstyles define their own cross-references
+4. **Streamlined Approach**: Less universal base, more focused TCG implementations
 
 #### Implementation Plan:
-1. Create basic project structure with sample cards and test cardstyle
-2. Implement metadata parser
-3. Basic CLI interface
-4. Template system foundation
+1. ✅ Create basic project structure with sample cards and test cardstyle
+2. ✅ Implement metadata parser  
+3. ✅ Basic CLI interface
+4. 🔄 Template system foundation (basic loading/validation complete)
+5. 🆕 Refactor to universal base spec with TCG-specific extensions
+6. 🆕 Update sample cards with proper TCG-specific field naming
+7. 🆕 Implement layer roles and style tokens
+
+#### Progress Log:
+
+**2025-10-26 - Basic Structure Complete**
+- Created full Go project structure with proper module layout
+- Implemented YAML frontmatter parser with markdown body processing
+- Created MTG template definition system
+- Built working CLI tool with validation and basic generation framework
+- Created 3 sample cards: Lightning Bolt, Serra Angel, Black Lotus
+- Fixed template YAML syntax issue with optional_fields
+
+**Current State:**
+- ✅ CLI accepts files/directories and validates cards
+- ✅ Metadata parsing strips markdown headers from card body
+- ✅ Template loading and validation working
+- ✅ Output path generation working
+- 🔄 Next: Implement actual image rendering
+
+**Test Results:**
+```
+.\tcg-cardgen.exe --validate-only ./examples/
+✓ All 3 sample cards validate successfully
+
+.\tcg-cardgen.exe --verbose ./examples/lightning_bolt.md  
+✓ Parsing and generation pipeline working
+```
 
 ## Next Steps
 1. Design project structure and Go modules

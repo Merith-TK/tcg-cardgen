@@ -1,0 +1,166 @@
+name: "MTG Basic Card"
+tcg: "mtg"
+version: "1.0.0"
+description: "Basic Magic: The Gathering card template with cross-TCG icon support"
+
+# Standard TCG dimensions at 300 DPI
+dimensions:
+  width: 750   # 2.5" at 300 DPI
+  height: 1050 # 3.5" at 300 DPI
+  dpi: 300
+
+# MTG-specific required fields - validates against MTG metadata
+required_fields:
+  - card.tcg              # Must be "mtg"
+  - card.title
+  - card.type
+  - mtg.mana_cost
+
+# Optional fields with smart defaults
+optional_fields:
+  mtg.mana_cost: "{{mtg.mana_colorless(0)}}"
+  mtg.cmc: 0
+  mtg.power: null
+  mtg.toughness: null
+  mtg.color_identity: []
+  mtg.keywords: []
+  card.rarity: "common"
+  card.set: "Unknown"
+  card.artist: "Unknown Artist"
+  card.print_this: "1"
+  card.print_total: "1"
+  card.body.size: "12"
+  card.artwork: null
+
+# Template layers (rendered in order)
+layers:
+  - name: "card_frame"
+    role: "frame"
+    type: "image"
+    source: "{{template_dir}}/frames/{{card.rarity}}_frame.png"
+    region: { x: 0, y: 0, width: 750, height: 1050 }
+    
+  - name: "artwork"
+    role: "artwork"
+    type: "image"
+    source: "{{card.artwork}}"
+    region: { x: 60, y: 100, width: 630, height: 460 }
+    fallback: "{{template_dir}}/artwork/default.png"
+    
+  - name: "title"
+    role: "card_title"
+    type: "text"
+    content: "{{card.title}}"
+    region: { x: 60, y: 60, width: 500, height: 35 }
+    font: 
+      family: "{{style_tokens.font_title}}"
+      size: 18
+      weight: "bold"
+      color: "{{style_tokens.color_title}}"
+    
+  - name: "mana_cost"
+    role: "mana_cost"
+    type: "text"
+    content: "{{mtg.mana_cost}}"
+    region: { x: 600, y: 60, width: 90, height: 35 }
+    font:
+      family: "{{style_tokens.font_text}}"
+      size: 14
+      color: "{{style_tokens.color_text}}"
+    icon_replace: true
+    align: "right"
+    
+  - name: "type_line"
+    role: "type_line"
+    type: "text"
+    content: "{{card.type}}"
+    region: { x: 60, y: 580, width: 630, height: 25 }
+    font:
+      family: "{{style_tokens.font_text}}"
+      size: 14
+      weight: "bold"
+      color: "{{style_tokens.color_text}}"
+    
+  - name: "card_text"
+    role: "rules_box"
+    type: "text"
+    content: "{{card.body}}"
+    region: { x: 70, y: 620, width: 610, height: 280 }
+    font:
+      family: "{{style_tokens.font_text}}"
+      size: "{{card.body.size}}"
+      color: "{{style_tokens.color_text}}"
+    icon_replace: true
+    strip_headers: true
+    
+  - name: "power_toughness"
+    role: "stats"
+    type: "text"
+    content: "{{mtg.power}}/{{mtg.toughness}}"
+    region: { x: 650, y: 970, width: 80, height: 30 }
+    font:
+      family: "{{style_tokens.font_text}}"
+      size: 16
+      weight: "bold"
+      color: "{{style_tokens.color_text}}"
+    condition: "{{mtg.power}} && {{mtg.toughness}}"
+    
+  - name: "artist_credit"
+    role: "artist"
+    type: "text"
+    content: "{{card.artist}}"
+    region: { x: 70, y: 920, width: 300, height: 15 }
+    font:
+      family: "{{style_tokens.font_small}}"
+      size: 8
+      style: "italic"
+      color: "#333333"
+    condition: "{{card.artist}}"
+    
+  - name: "set_info"
+    role: "set_info"
+    type: "text"
+    content: "{{card.set}} {{card.print_this}}/{{card.print_total}}"
+    region: { x: 580, y: 1020, width: 150, height: 15 }
+    font:
+      family: "{{style_tokens.font_small}}"
+      size: 8
+      color: "#333333"
+    align: "right"
+
+# Style tokens for consistent theming
+style_tokens:
+  font_title: "Beleren"
+  font_text: "Matrix"
+  font_small: "Matrix"
+  color_title: "#000000"
+  color_text: "#000000"
+
+# Icon definitions - supports cross-TCG usage
+icons:
+  # Native MTG mana symbols
+  mtg.mana_white: "{{icon_dir}}/mtg/mana/white.png"
+  mtg.mana_blue: "{{icon_dir}}/mtg/mana/blue.png"
+  mtg.mana_black: "{{icon_dir}}/mtg/mana/black.png"
+  mtg.mana_red: "{{icon_dir}}/mtg/mana/red.png"
+  mtg.mana_green: "{{icon_dir}}/mtg/mana/green.png"
+  mtg.mana_colorless: "{{icon_dir}}/mtg/mana/colorless_{{param}}.png"
+  
+  # MTG symbols
+  mtg.tap: "{{icon_dir}}/mtg/symbols/tap.png"
+  mtg.untap: "{{icon_dir}}/mtg/symbols/untap.png"
+  
+  # Set symbols
+  mtg.set.alpha: "{{icon_dir}}/mtg/sets/alpha.png"
+  mtg.set.beta: "{{icon_dir}}/mtg/sets/beta.png"
+  mtg.set.unlimited: "{{icon_dir}}/mtg/sets/unlimited.png"
+  
+  # Cross-TCG aliases (allows other TCG icons to be used in MTG cards)
+  # These let you use {{pkm.energy_red}} in an MTG card, for custom designs
+  pkm.energy_red: "{{icon_dir}}/pokemon/energy/fire.png"
+  pkm.energy_blue: "{{icon_dir}}/pokemon/energy/water.png"
+  
+  # Generic TCG cost aliases (cardstyle-defined cross-references)
+  tcg.cost_red: "{{mtg.mana_red}}"           # Points to MTG red mana
+  tcg.cost_blue: "{{mtg.mana_blue}}"         # Points to MTG blue mana
+  tcg.cost_colorless: "{{mtg.mana_colorless({{param}})}}"  # Dynamic reference

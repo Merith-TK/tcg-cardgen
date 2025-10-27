@@ -1,0 +1,93 @@
+name: "MTG Basic Card"
+tcg: "mtg"
+version: "1.0.0"
+description: "Basic Magic: The Gathering card template extending universal base"
+
+# Extend the universal base template
+extends: "../universal_base.yaml"
+
+# MTG-specific required fields (in addition to universal ones)
+required_fields:
+  - card.tcg
+  - card.title
+  - card.type
+  - mtg.mana_cost
+
+# MTG-specific optional fields
+optional_fields:
+  mtg.mana_cost: "{{mtg.mana_colorless(0)}}"
+  mtg.cmc: 0                    # Converted mana cost
+  mtg.power: null
+  mtg.toughness: null
+  mtg.type: "{{card.type}}"     # MTG-specific type formatting
+  mtg.rarity: "{{card.rarity}}" # MTG rarity system
+  mtg.color_identity: []        # Array of colors
+  mtg.keywords: []              # Array of keywords like "Flying", "Vigilance"
+
+# Override universal layers for MTG-specific styling
+overrides:
+  # Update mana cost layer reference
+  - layer: "rules_text"
+    content: "{{card.body}}"
+    font:
+      size: "{{card.body.size|12}}"
+
+# Additional MTG-specific layers
+additional_layers:
+  # Mana cost in top-right corner
+  - name: "mana_cost"
+    role: "mana_cost"
+    type: "text"
+    content: "{{mtg.mana_cost}}"
+    region: { x: 600, y: 60, width: 90, height: 35 }
+    font:
+      family: "{{style_tokens.font_text}}"
+      size: 14
+      color: "{{style_tokens.color_text}}"
+    icon_replace: true
+    align: "right"
+
+  # Power/Toughness box (only for creatures)
+  - name: "power_toughness"
+    role: "stats"
+    type: "text"
+    content: "{{mtg.power}}/{{mtg.toughness}}"
+    region: { x: 650, y: 970, width: 80, height: 30 }
+    font:
+      family: "{{style_tokens.font_text}}"
+      size: 16
+      weight: "bold"
+      color: "{{style_tokens.color_text}}"
+    condition: "{{mtg.power}} && {{mtg.toughness}}"
+
+# MTG-specific style tokens
+style_tokens:
+  font_title: "Beleren"
+  font_text: "Matrix"
+  font_small: "Matrix"
+  color_title: "#000000"
+  color_text: "#000000"
+  color_mana: "#000000"
+
+# MTG icon definitions
+icons:
+  # Basic mana symbols
+  mtg.mana_white: "{{icon_dir}}/mtg/mana/white.png"
+  mtg.mana_blue: "{{icon_dir}}/mtg/mana/blue.png"
+  mtg.mana_black: "{{icon_dir}}/mtg/mana/black.png"
+  mtg.mana_red: "{{icon_dir}}/mtg/mana/red.png"
+  mtg.mana_green: "{{icon_dir}}/mtg/mana/green.png"
+  mtg.mana_colorless: "{{icon_dir}}/mtg/mana/colorless_{{param}}.png"
+  
+  # Special symbols
+  mtg.tap: "{{icon_dir}}/mtg/symbols/tap.png"
+  mtg.untap: "{{icon_dir}}/mtg/symbols/untap.png"
+  
+  # Hybrid mana (examples)
+  mtg.mana_wu: "{{icon_dir}}/mtg/mana/white_blue.png"
+  mtg.mana_ub: "{{icon_dir}}/mtg/mana/blue_black.png"
+  
+  # Set symbols (examples - these would be populated by set packs)
+  mtg.set.alpha: "{{icon_dir}}/mtg/sets/alpha.png"
+  mtg.set.beta: "{{icon_dir}}/mtg/sets/beta.png"
+  mtg.set.unlimited: "{{icon_dir}}/mtg/sets/unlimited.png"

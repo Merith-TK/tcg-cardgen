@@ -1,0 +1,126 @@
+name: "MTG Basic Card"
+tcg: "mtg"
+version: "1.0.0"
+description: "Basic Magic: The Gathering card template"
+
+# Standard TCG dimensions at 300 DPI
+dimensions:
+  width: 750   # 2.5" at 300 DPI
+  height: 1050 # 3.5" at 300 DPI
+  dpi: 300
+
+# Template layers (rendered in order)
+layers:
+  - name: "card_frame"
+    type: "image"
+    source: "{{template_dir}}/frames/{{card.rarity}}_frame.png"
+    region: { x: 0, y: 0, width: 750, height: 1050 }
+    
+  - name: "artwork"
+    type: "image"
+    source: "{{card.artwork}}"
+    region: { x: 60, y: 100, width: 630, height: 460 }
+    fallback: "{{template_dir}}/artwork/default.png"
+    
+  - name: "title"
+    type: "text"
+    content: "{{card.title}}"
+    region: { x: 60, y: 60, width: 500, height: 35 }
+    font: 
+      family: "Arial"
+      size: 18
+      weight: "bold"
+      color: "#000000"
+    
+  - name: "mana_cost"
+    type: "text"
+    content: "{{card.mana_cost}}"
+    region: { x: 600, y: 60, width: 90, height: 35 }
+    font:
+      family: "Arial"
+      size: 14
+      color: "#000000"
+    icon_replace: true
+    align: "right"
+    
+  - name: "type_line"
+    type: "text"
+    content: "{{card.type}}"
+    region: { x: 60, y: 580, width: 630, height: 25 }
+    font:
+      family: "Arial"
+      size: 14
+      weight: "bold"
+      color: "#000000"
+    
+  - name: "card_text"
+    type: "text"
+    content: "{{card.body}}"
+    region: { x: 70, y: 620, width: 610, height: 280 }
+    font:
+      family: "Arial"
+      size: "{{card.body.size|12}}"
+      color: "#000000"
+    icon_replace: true
+    strip_headers: true  # Don't render markdown headers in body
+    
+  - name: "power_toughness"
+    type: "text"
+    content: "{{mtg.power}}/{{mtg.toughness}}"
+    region: { x: 650, y: 970, width: 80, height: 30 }
+    font:
+      family: "Arial"
+      size: 16
+      weight: "bold"
+      color: "#000000"
+    condition: "{{mtg.power}} && {{mtg.toughness}}"  # Only show if both exist
+    
+  - name: "artist_credit"
+    type: "text"
+    content: "{{card.artist}}"
+    region: { x: 70, y: 920, width: 300, height: 15 }
+    font:
+      family: "Arial"
+      size: 8
+      style: "italic"
+      color: "#333333"
+    condition: "{{card.artist}}"
+    
+  - name: "set_info"
+    type: "text"
+    content: "{{card.set}} {{card.print_this|1}}/{{card.print_total|1}}"
+    region: { x: 580, y: 1020, width: 150, height: 15 }
+    font:
+      family: "Arial"
+      size: 8
+      color: "#333333"
+    align: "right"
+
+# Required metadata fields
+required_fields:
+  - card.tcg
+  - card.title
+  - card.type
+
+# Optional fields with defaults
+optional_fields:
+  card.mana_cost: "{{mtg.mana_colorless(0)}}"
+  card.rarity: "common"
+  card.set: "Unknown"
+  card.artist: "Unknown Artist"
+  card.print_this: "1"
+  card.print_total: "1"
+  card.body.size: "12"
+  mtg.power: null
+  mtg.toughness: null
+  card.artwork: null
+
+# Icon definitions for this template
+icons:
+  mtg.mana_white: "{{icon_dir}}/mana/white.png"
+  mtg.mana_blue: "{{icon_dir}}/mana/blue.png"
+  mtg.mana_black: "{{icon_dir}}/mana/black.png"
+  mtg.mana_red: "{{icon_dir}}/mana/red.png"
+  mtg.mana_green: "{{icon_dir}}/mana/green.png"
+  mtg.mana_colorless: "{{icon_dir}}/mana/colorless_{{param}}.png"
+  mtg.tap: "{{icon_dir}}/symbols/tap.png"
