@@ -29,8 +29,16 @@ optional_fields:
   card.artist: "Unknown Artist"
   card.print_this: "1"
   card.print_total: "1"
-  card.body.size: "12"
   card.artwork: null
+  # MTG-specific font size overrides
+  mtg.font_size.title: 32
+  mtg.font_size.mana_cost: 24
+  mtg.font_size.type_line: 24
+  mtg.font_size.card_text: 20
+  mtg.font_size.power_toughness: 28
+  mtg.font_size.artist: 16
+  mtg.font_size.set_info: 14
+  mtg.font_size.footer: 14
 
 # Template layers (rendered in order)
 layers:
@@ -54,7 +62,7 @@ layers:
     region: { x: 60, y: 60, width: 500, height: 40 }
     font: 
       family: "{{style_tokens.font_title}}"
-      size: 32
+      size: "{{mtg.font_size.title}}"
       weight: "bold"
       color: "{{style_tokens.color_title}}"
     
@@ -65,7 +73,7 @@ layers:
     region: { x: 600, y: 60, width: 90, height: 40 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: 24
+      size: "{{mtg.font_size.mana_cost}}"
       color: "{{style_tokens.color_text}}"
     icon_replace: true
     align: "right"
@@ -77,7 +85,7 @@ layers:
     region: { x: 60, y: 580, width: 630, height: 30 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: 24
+      size: "{{mtg.font_size.type_line}}"
       weight: "bold"
       color: "{{style_tokens.color_text}}"
     
@@ -88,7 +96,7 @@ layers:
     region: { x: 70, y: 620, width: 610, height: 280 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: 20
+      size: "{{mtg.font_size.card_text}}"
       color: "{{style_tokens.color_text}}"
     icon_replace: true
     strip_headers: true
@@ -100,7 +108,7 @@ layers:
     region: { x: 650, y: 970, width: 80, height: 40 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: 28
+      size: "{{mtg.font_size.power_toughness}}"
       weight: "bold"
       color: "{{style_tokens.color_text}}"
     condition: "{{mtg.power}} && {{mtg.toughness}}"
@@ -112,10 +120,23 @@ layers:
     region: { x: 70, y: 920, width: 300, height: 20 }
     font:
       family: "{{style_tokens.font_small}}"
-      size: 16
+      size: "{{mtg.font_size.artist}}"
       style: "italic"
       color: "#333333"
     condition: "{{card.artist}}"
+    
+  - name: "footer"
+    role: "footer"
+    type: "text"
+    content: "{{card.footer}}"
+    region: { x: 70, y: 950, width: 610, height: 60 }
+    font:
+      family: "{{style_tokens.font_small}}"
+      size: "{{mtg.font_size.footer}}"
+      style: "italic"
+      color: "#666666"
+    condition: "{{card.footer}}"
+    icon_replace: true
     
   - name: "set_info"
     role: "set_info"
@@ -124,7 +145,7 @@ layers:
     region: { x: 580, y: 1020, width: 150, height: 20 }
     font:
       family: "{{style_tokens.font_small}}"
-      size: 14
+      size: "{{mtg.font_size.set_info}}"
       color: "#333333"
     align: "right"
 
