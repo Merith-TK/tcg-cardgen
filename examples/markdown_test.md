@@ -1,18 +1,18 @@
 ---
-card.tcg: "mtg"
-card.title: "Markdown Test Card"
-card.type: "Instant"
-card.rarity: "mythic"
-card.set: "Formatting Set"
-card.artist: "Typography Master"
-card.print_this: 1
-card.print_total: 1
-mtg.mana_cost: "{{tcg.cost_blue}}{{tcg.cost_colorless(2)}}"
-mtg.cmc: 3
-mtg.color_identity: ["blue"]
+card:
+  tcg: mtg
+  rarity: mythic
+  set: Formatting Set
+  artist: Typography Master
+mtg:
+  cmc: 3
+  color_identity: ["blue"]
 ---
 
 # Markdown Test Card
+> {{tcg.cost_blue}}{{tcg.cost_colorless(2)}}
+
+> **Instant**
 
 This card tests **bold text** and *italic text* and even ***bold italic text***.
 
@@ -29,6 +29,5 @@ This card tests **bold text** and *italic text* and even ***bold italic text***.
 
 **Reminder text**: This is how reminder text looks in *italic formatting*.
 
-## Footer
-
+-----
 *"The pen is mightier than the sword, but **magic** is mightier than both."* —Ancient Proverb

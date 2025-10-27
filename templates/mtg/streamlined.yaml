@@ -12,13 +12,12 @@ dimensions:
 # MTG-specific required fields - validates against MTG metadata
 required_fields:
   - card.tcg              # Must be "mtg"
-  - card.title
-  - card.type
-  - mtg.mana_cost
+  - card.title            # Parsed from # Header or frontmatter
+  - card.type             # Parsed from > **Type** or frontmatter
 
 # Optional fields with smart defaults
 optional_fields:
-  mtg.mana_cost: "{{mtg.mana_colorless(0)}}"
+  card.mana_cost: "{{mtg.cost_colorless(0)}}"  # Parsed from > {{cost}} or frontmatter
   mtg.cmc: 0
   mtg.power: null
   mtg.toughness: null
@@ -31,10 +30,10 @@ optional_fields:
   card.print_total: "1"
   card.artwork: null
   # MTG-specific font size overrides
-  mtg.font_size.title: 32
+  mtg.font_size.title: 24
   mtg.font_size.mana_cost: 24
-  mtg.font_size.type_line: 24
-  mtg.font_size.card_text: 20
+  mtg.font_size.type_line: 30
+  mtg.font_size.card_text: 32
   mtg.font_size.power_toughness: 28
   mtg.font_size.artist: 16
   mtg.font_size.set_info: 14
@@ -69,7 +68,7 @@ layers:
   - name: "mana_cost"
     role: "mana_cost"
     type: "text"
-    content: "{{mtg.mana_cost}}"
+    content: "{{card.mana_cost}}"
     region: { x: 600, y: 60, width: 90, height: 40 }
     font:
       family: "{{style_tokens.font_text}}"

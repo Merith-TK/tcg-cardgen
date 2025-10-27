@@ -83,8 +83,19 @@ func (r *Renderer) RenderCard(card *metadata.Card, template *templates.Template,
 func (r *Renderer) buildTemplateVariables(card *metadata.Card, template *templates.Template) map[string]string {
 	vars := make(map[string]string)
 
-	// Separate body and footer content
-	body, footer := r.separateFooter(card.Body)
+	// Use parsed rules text for body, fall back to full body if needed
+	body := card.RulesText
+	if body == "" {
+		body = card.Body
+	}
+
+	// Separate footer from body (in case it wasn't parsed separately)
+	bodyContent, footer := r.separateFooter(body)
+
+	// Use parsed flavor text for footer if available
+	if card.FlavorText != "" && footer == "" {
+		footer = card.FlavorText
+	}
 
 	// Basic card fields
 	vars["card.title"] = card.Title
@@ -92,8 +103,11 @@ func (r *Renderer) buildTemplateVariables(card *metadata.Card, template *templat
 	vars["card.rarity"] = card.Rarity
 	vars["card.set"] = card.Set
 	vars["card.artist"] = card.Artist
-	vars["card.body"] = body
+	vars["card.body"] = bodyContent
 	vars["card.footer"] = footer
+	vars["card.rules_text"] = card.RulesText
+	vars["card.flavor_text"] = card.FlavorText
+	vars["card.mana_cost"] = card.ManaCost
 	vars["card.print_this"] = strconv.Itoa(card.PrintThis)
 	vars["card.print_total"] = strconv.Itoa(card.PrintTotal)
 
