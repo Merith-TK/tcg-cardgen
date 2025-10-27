@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/Merith-TK/tcg-cardgen/internal/metadata"
+	"github.com/Merith-TK/tcg-cardgen/internal/renderer"
 	"github.com/Merith-TK/tcg-cardgen/internal/templates"
 )
 
@@ -22,6 +23,7 @@ type Generator struct {
 	config          *Config
 	templateManager *templates.Manager
 	metadataParser  *metadata.Parser
+	renderer        *renderer.Renderer
 }
 
 // NewGenerator creates a new card generator with the given config
@@ -34,6 +36,7 @@ func NewGenerator(config *Config) *Generator {
 		config:          config,
 		templateManager: templates.NewManager(config.TemplateDir),
 		metadataParser:  metadata.NewParser(),
+		renderer:        renderer.NewRenderer(),
 	}
 }
 
@@ -89,8 +92,16 @@ func (g *Generator) GenerateCard(filePath string) error {
 		fmt.Printf("Output path: %s\n", outputPath)
 	}
 
-	// TODO: Implement actual rendering
-	fmt.Printf("Would generate: %s -> %s\n", filePath, outputPath)
+	// Render the card
+	if err := g.renderer.RenderCard(card, template, outputPath); err != nil {
+		return fmt.Errorf("failed to render card: %v", err)
+	}
+
+	if g.config.Verbose {
+		fmt.Printf("✓ Generated: %s\n", outputPath)
+	} else {
+		fmt.Printf("Generated: %s -> %s\n", filePath, outputPath)
+	}
 
 	return nil
 }

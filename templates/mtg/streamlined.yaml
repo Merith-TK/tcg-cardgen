@@ -51,10 +51,10 @@ layers:
     role: "card_title"
     type: "text"
     content: "{{card.title}}"
-    region: { x: 60, y: 60, width: 500, height: 35 }
+    region: { x: 60, y: 60, width: 500, height: 40 }
     font: 
       family: "{{style_tokens.font_title}}"
-      size: 18
+      size: 32
       weight: "bold"
       color: "{{style_tokens.color_title}}"
     
@@ -62,10 +62,10 @@ layers:
     role: "mana_cost"
     type: "text"
     content: "{{mtg.mana_cost}}"
-    region: { x: 600, y: 60, width: 90, height: 35 }
+    region: { x: 600, y: 60, width: 90, height: 40 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: 14
+      size: 24
       color: "{{style_tokens.color_text}}"
     icon_replace: true
     align: "right"
@@ -74,10 +74,10 @@ layers:
     role: "type_line"
     type: "text"
     content: "{{card.type}}"
-    region: { x: 60, y: 580, width: 630, height: 25 }
+    region: { x: 60, y: 580, width: 630, height: 30 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: 14
+      size: 24
       weight: "bold"
       color: "{{style_tokens.color_text}}"
     
@@ -88,7 +88,7 @@ layers:
     region: { x: 70, y: 620, width: 610, height: 280 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: "{{card.body.size}}"
+      size: 20
       color: "{{style_tokens.color_text}}"
     icon_replace: true
     strip_headers: true
@@ -97,10 +97,10 @@ layers:
     role: "stats"
     type: "text"
     content: "{{mtg.power}}/{{mtg.toughness}}"
-    region: { x: 650, y: 970, width: 80, height: 30 }
+    region: { x: 650, y: 970, width: 80, height: 40 }
     font:
       family: "{{style_tokens.font_text}}"
-      size: 16
+      size: 28
       weight: "bold"
       color: "{{style_tokens.color_text}}"
     condition: "{{mtg.power}} && {{mtg.toughness}}"
@@ -109,10 +109,10 @@ layers:
     role: "artist"
     type: "text"
     content: "{{card.artist}}"
-    region: { x: 70, y: 920, width: 300, height: 15 }
+    region: { x: 70, y: 920, width: 300, height: 20 }
     font:
       family: "{{style_tokens.font_small}}"
-      size: 8
+      size: 16
       style: "italic"
       color: "#333333"
     condition: "{{card.artist}}"
@@ -121,10 +121,10 @@ layers:
     role: "set_info"
     type: "text"
     content: "{{card.set}} {{card.print_this}}/{{card.print_total}}"
-    region: { x: 580, y: 1020, width: 150, height: 15 }
+    region: { x: 580, y: 1020, width: 150, height: 20 }
     font:
       family: "{{style_tokens.font_small}}"
-      size: 8
+      size: 14
       color: "#333333"
     align: "right"
 
