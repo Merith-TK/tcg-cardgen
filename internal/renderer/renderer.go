@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -111,9 +112,53 @@ func (r *Renderer) buildTemplateVariables(card *metadata.Card, template *templat
 	vars["card.print_this"] = strconv.Itoa(card.PrintThis)
 	vars["card.print_total"] = strconv.Itoa(card.PrintTotal)
 
+	// Add artwork from metadata if present
+	// Check for card.artwork in the nested card map
+	if cardMap, exists := card.Metadata["card"]; exists {
+		if cardMapTyped, ok := cardMap.(map[string]interface{}); ok {
+			if artwork, exists := cardMapTyped["artwork"]; exists {
+				if artworkStr, ok := artwork.(string); ok {
+					// Simple string format: card.artwork: "url"
+					vars["card.artwork"] = artworkStr
+				} else if artworkMap, ok := artwork.(map[string]interface{}); ok {
+					// Nested format: card.artwork: { url: "...", fit: "..." }
+					if url, exists := artworkMap["url"]; exists {
+						if urlStr, ok := url.(string); ok {
+							vars["card.artwork"] = urlStr // Store the URL as card.artwork
+						}
+					}
+					if fit, exists := artworkMap["fit"]; exists {
+						if fitStr, ok := fit.(string); ok {
+							vars["card.artwork.fit"] = fitStr
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Add all metadata fields
 	for key, value := range card.Metadata {
-		if str, ok := value.(string); ok {
+		// Handle nested maps (like card.artwork being in card map)
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			for nestedKey, nestedValue := range nestedMap {
+				// Skip artwork as it's handled specially above
+				if key == "card" && nestedKey == "artwork" {
+					continue
+				}
+
+				fullKey := key + "." + nestedKey
+				if str, ok := nestedValue.(string); ok {
+					vars[fullKey] = str
+				} else if num, ok := nestedValue.(int); ok {
+					vars[fullKey] = strconv.Itoa(num)
+				} else if fl, ok := nestedValue.(float64); ok {
+					vars[fullKey] = strconv.FormatFloat(fl, 'f', -1, 64)
+				} else if nestedValue != nil {
+					vars[fullKey] = fmt.Sprintf("%v", nestedValue)
+				}
+			}
+		} else if str, ok := value.(string); ok {
 			vars[key] = str
 		} else if num, ok := value.(int); ok {
 			vars[key] = strconv.Itoa(num)
@@ -172,6 +217,7 @@ func (r *Renderer) renderLayer(dc *gg.Context, layer templates.Layer, vars map[s
 func (r *Renderer) renderImageLayer(dc *gg.Context, layer templates.Layer, vars map[string]string) error {
 	// Resolve image source
 	imagePath := r.substituteVariables(layer.Source, vars)
+
 	if imagePath == "" {
 		// Try fallback
 		if layer.Fallback != "" {
@@ -197,10 +243,89 @@ func (r *Renderer) renderImageLayer(dc *gg.Context, layer templates.Layer, vars 
 		}
 	}
 
-	// Draw image in the specified region
-	dc.DrawImageAnchored(img, layer.Region.X+layer.Region.Width/2, layer.Region.Y+layer.Region.Height/2, 0.5, 0.5)
+	// Draw image fitted to the specified region
+	// Priority: card.artwork.fit > template fit_mode > "fill" default
+	fitMode := layer.FitMode
+	if cardFitMode, exists := vars["card.artwork.fit"]; exists && cardFitMode != "" {
+		fitMode = cardFitMode // Card-specific override
+	}
+	if fitMode == "" {
+		fitMode = "fill" // Final default
+	}
+	fittedImg := r.createFittedImage(img, layer.Region, fitMode)
+	dc.DrawImageAnchored(fittedImg, layer.Region.X+layer.Region.Width/2, layer.Region.Y+layer.Region.Height/2, 0.5, 0.5)
 
 	return nil
+}
+
+// createFittedImage creates a new image that fits the specified region with the given fit mode
+func (r *Renderer) createFittedImage(img image.Image, region templates.Region, fitMode string) image.Image {
+	imgBounds := img.Bounds()
+	imgWidth := float64(imgBounds.Dx())
+	imgHeight := float64(imgBounds.Dy())
+
+	regionWidth := float64(region.Width)
+	regionHeight := float64(region.Height)
+
+	// Create a new image context for the fitted result
+	fittedDC := gg.NewContext(region.Width, region.Height)
+
+	switch fitMode {
+	case "fill": // Scale to fill region completely, crop if necessary
+		// Calculate scaling to fill the region (crop if necessary)
+		scaleX := regionWidth / imgWidth
+		scaleY := regionHeight / imgHeight
+		scale := scaleX
+		if scaleY > scaleX {
+			scale = scaleY // Use larger scale to fill region completely
+		}
+
+		// Calculate scaled dimensions
+		scaledWidth := imgWidth * scale
+		scaledHeight := imgHeight * scale
+
+		// Calculate position to center the scaled image
+		drawX := (regionWidth - scaledWidth) / 2
+		drawY := (regionHeight - scaledHeight) / 2
+
+		// Scale and draw the image
+		fittedDC.Scale(scale, scale)
+		fittedDC.DrawImageAnchored(img, int(drawX/scale+imgWidth/2), int(drawY/scale+imgHeight/2), 0.5, 0.5)
+
+	case "fit": // Scale to fit entirely within region, may leave empty space
+		// Calculate scaling to fit within the region
+		scaleX := regionWidth / imgWidth
+		scaleY := regionHeight / imgHeight
+		scale := scaleX
+		if scaleY < scaleX {
+			scale = scaleY // Use smaller scale to fit entirely
+		}
+
+		// Calculate scaled dimensions
+		scaledWidth := imgWidth * scale
+		scaledHeight := imgHeight * scale
+
+		// Calculate position to center the scaled image
+		drawX := (regionWidth - scaledWidth) / 2
+		drawY := (regionHeight - scaledHeight) / 2
+
+		// Scale and draw the image
+		fittedDC.Scale(scale, scale)
+		fittedDC.DrawImageAnchored(img, int(drawX/scale+imgWidth/2), int(drawY/scale+imgHeight/2), 0.5, 0.5)
+
+	case "stretch": // Stretch to exact region dimensions (may distort)
+		fittedDC.DrawImageAnchored(img, region.Width/2, region.Height/2, 0.5, 0.5)
+
+	case "center": // No scaling, just center (may crop or leave empty space)
+		drawX := (regionWidth - imgWidth) / 2
+		drawY := (regionHeight - imgHeight) / 2
+		fittedDC.DrawImageAnchored(img, int(drawX+imgWidth/2), int(drawY+imgHeight/2), 0.5, 0.5)
+
+	default: // Default to fill
+		return r.createFittedImage(img, region, "fill")
+	}
+
+	return fittedDC.Image()
 }
 
 // renderTextLayer renders a text layer
@@ -242,26 +367,56 @@ func (r *Renderer) renderTextLayer(dc *gg.Context, layer templates.Layer, vars m
 	return nil
 }
 
-// loadImage loads an image with caching
+// loadImage loads an image with caching (supports local files and URLs)
 func (r *Renderer) loadImage(path string) (image.Image, error) {
 	// Check cache first
 	if img, exists := r.imageCache[path]; exists {
 		return img, nil
 	}
 
-	// Check if file exists
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil, fmt.Errorf("image file not found: %s", path)
+	var img image.Image
+	var err error
+
+	// Check if it's a URL
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		img, err = r.downloadImage(path)
+	} else {
+		// Check if local file exists
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return nil, fmt.Errorf("image file not found: %s", path)
+		}
+
+		// Load local image
+		img, err = gg.LoadImage(path)
 	}
 
-	// Load image
-	img, err := gg.LoadImage(path)
 	if err != nil {
 		return nil, err
 	}
 
 	// Cache it
 	r.imageCache[path] = img
+	return img, nil
+}
+
+// downloadImage downloads an image from a URL
+func (r *Renderer) downloadImage(url string) (image.Image, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download image: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+	}
+
+	// Decode the image
+	img, _, err := image.Decode(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode image: %v", err)
+	}
+
 	return img, nil
 }
 

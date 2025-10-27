@@ -4,6 +4,7 @@ card:
   rarity: rare
   set: "{{mtg.set.alpha}}"
   artist: Christopher Rush
+  artwork: "https://wallpaperaccess.com/full/8948539.jpg"
 mtg:
   cmc: 0
   color_identity: []

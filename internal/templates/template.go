@@ -59,6 +59,7 @@ type Layer struct {
 	Content      string `yaml:"content,omitempty"`
 	Region       Region `yaml:"region"`
 	Font         *Font  `yaml:"font,omitempty"`
+	FitMode      string `yaml:"fit_mode,omitempty"` // Image fit mode: "fill", "fit", "stretch", "center"
 	IconReplace  bool   `yaml:"icon_replace,omitempty"`
 	StripHeaders bool   `yaml:"strip_headers,omitempty"`
 	Condition    string `yaml:"condition,omitempty"`

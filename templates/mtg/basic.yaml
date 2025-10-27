@@ -20,6 +20,7 @@ layers:
     type: "image"
     source: "{{card.artwork}}"
     region: { x: 60, y: 100, width: 630, height: 460 }
+    fit_mode: "fill"  # Scale and crop to fill region completely
     fallback: "{{template_dir}}/artwork/default.png"
     
   - name: "title"
