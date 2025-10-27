@@ -146,13 +146,14 @@ tcg-cardgen ./cards/ --validate-only
 ---
 card.title: "Lightning Bolt"
 card.mana_cost: "{{mtg.mana_red}}"
-card.body: "Lightning Bolt deals 3 damage to any target. {{mtg.mana_red}}{{mtg.mana_red}}: Draw a card."
 mtg.power: "{{mtg.power_undefined}}"
 mtg.toughness: "{{mtg.toughness_undefined}}"
 ---
 
 # Lightning Bolt
-A classic burn spell.
+Lightning Bolt deals 3 damage to any target. 
+
+{{mtg.mana_red}}{{mtg.mana_red}}: Draw a card.
 ```
 
-Would render mana symbols and power/toughness appropriately in the MTG template.
+The `card.body` would be the entire markdown content after the frontmatter, with icon replacements processed during rendering. This would render mana symbols and power/toughness appropriately in the MTG template.

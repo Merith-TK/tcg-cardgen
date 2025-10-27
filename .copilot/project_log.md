@@ -39,6 +39,7 @@
 - Multi-TCG support in single card (mtg.power + pkm.hp)
 - Generic `card.*` namespace for common properties
 - `card.tcg` to specify target game
+- **IMPORTANT**: `card.body` is the markdown content after frontmatter, NOT a metadata field
 
 **Performance Requirements:**
 - Memory efficient: Load assets as needed, cache during batch
@@ -50,8 +51,18 @@
 - card.title (defaults to filename)
 - card.set, card.lang, card.designer
 - card.artwork (local/URL with caching)
-- card.body.size, card.body.centered
+- card.body.size, card.body.centered (for formatting the markdown content)
 - Template-specific fields (mtg.power, pkm.hp, etc.)
+
+#### Corrections Made:
+- Fixed architecture example: `card.body` is markdown content, not frontmatter field
+- Clarified: Markdown headers (# Title) should NOT be rendered in card body for MTG cards
+
+#### Implementation Plan:
+1. Create basic project structure with sample cards and test cardstyle
+2. Implement metadata parser
+3. Basic CLI interface
+4. Template system foundation
 
 ## Next Steps
 1. Design project structure and Go modules
