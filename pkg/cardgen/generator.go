@@ -53,18 +53,13 @@ func (g *Generator) GenerateCard(filePath string) error {
 	}
 
 	if g.config.Verbose {
-		fmt.Printf("Card TCG: %s, Title: %s\n", card.TCG, card.Title)
+		fmt.Printf("Card TCG: %s, CardStyle: %s, Title: %s\n", card.TCG, card.CardStyle, card.Title)
 	}
 
-	// Load appropriate template
-	templateName := "basic"
-	if card.TCG == "mtg" {
-		templateName = "streamlined" // Use our new MTG template for testing
-	}
-
-	template, err := g.templateManager.LoadTemplate(card.TCG, templateName)
+	// Load appropriate template based on TCG and cardstyle
+	template, err := g.templateManager.LoadTemplate(card.TCG, card.CardStyle)
 	if err != nil {
-		return fmt.Errorf("failed to load template for %s: %v", card.TCG, err)
+		return fmt.Errorf("failed to load cardstyle %s/%s: %v", card.TCG, card.CardStyle, err)
 	}
 
 	// Validate card against template
@@ -104,4 +99,39 @@ func (g *Generator) GenerateCard(filePath string) error {
 	}
 
 	return nil
+}
+
+// CardStyleInfo represents information about a discovered cardstyle (exported version)
+type CardStyleInfo struct {
+	TCG         string
+	Name        string
+	DisplayName string
+	Description string
+	Version     string
+	Source      string // "built-in" or path to custom cardstyle
+	Extends     string // Base template it extends
+}
+
+// ListCardstyles discovers and lists all available cardstyles
+func (g *Generator) ListCardstyles() ([]CardStyleInfo, error) {
+	templateInfos, err := g.templateManager.ListAvailableCardstyles()
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert internal CardStyleInfo to exported version
+	cardstyles := make([]CardStyleInfo, len(templateInfos))
+	for i, info := range templateInfos {
+		cardstyles[i] = CardStyleInfo{
+			TCG:         info.TCG,
+			Name:        info.Name,
+			DisplayName: info.DisplayName,
+			Description: info.Description,
+			Version:     info.Version,
+			Source:      info.Source,
+			Extends:     info.Extends,
+		}
+	}
+
+	return cardstyles, nil
 }

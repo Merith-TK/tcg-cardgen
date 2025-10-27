@@ -13,12 +13,13 @@ import (
 // Card represents a parsed card with metadata and content
 type Card struct {
 	// Core card data (extracted from body or frontmatter)
-	TCG    string `yaml:"card.tcg"`
-	Title  string `yaml:"card.title"`
-	Type   string `yaml:"card.type"`
-	Rarity string `yaml:"card.rarity"`
-	Set    string `yaml:"card.set"`
-	Artist string `yaml:"card.artist"`
+	TCG       string `yaml:"card.tcg"`
+	CardStyle string `yaml:"card.cardstyle"`
+	Title     string `yaml:"card.title"`
+	Type      string `yaml:"card.type"`
+	Rarity    string `yaml:"card.rarity"`
+	Set       string `yaml:"card.set"`
+	Artist    string `yaml:"card.artist"`
 
 	// Print information
 	PrintThis  int `yaml:"card.print_this"`
@@ -223,5 +224,10 @@ func (p *Parser) setDefaults(card *Card, filePath string) {
 	// Default TCG
 	if card.TCG == "" {
 		card.TCG = "mtg" // Default to MTG for now
+	}
+
+	// Default CardStyle
+	if card.CardStyle == "" {
+		card.CardStyle = "basic" // Default to basic cardstyle
 	}
 }
