@@ -10,6 +10,7 @@ card:
 
 mtg:
   cmc: 0
+  color: red                      # Color affinity - red frame
   type_line: Creature — Goblin
   power: 1
   toughness: 1

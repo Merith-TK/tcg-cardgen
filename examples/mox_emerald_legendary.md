@@ -10,6 +10,7 @@ card:
 
 mtg:
   cmc: 0
+  color: green                    # Color affinity - green frame (produces green mana)
   type_line: Legendary Artifact
   mana_cost: []
 ---
