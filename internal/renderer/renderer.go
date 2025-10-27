@@ -129,6 +129,19 @@ func (r *Renderer) buildTemplateVariables(card *metadata.Card, template *templat
 		vars["style_tokens."+key] = value
 	}
 
+	// Add template optional fields (includes font sizes and other defaults)
+	for key, value := range template.Optional {
+		if str, ok := value.(string); ok {
+			vars[key] = str
+		} else if num, ok := value.(int); ok {
+			vars[key] = strconv.Itoa(num)
+		} else if fl, ok := value.(float64); ok {
+			vars[key] = strconv.FormatFloat(fl, 'f', -1, 64)
+		} else if value != nil {
+			vars[key] = fmt.Sprintf("%v", value)
+		}
+	}
+
 	// Add template directory
 	vars["template_dir"] = template.TemplateDir
 	vars["icon_dir"] = filepath.Join(template.TemplateDir, "icons")
@@ -273,55 +286,6 @@ func (r *Renderer) renderPlaceholder(dc *gg.Context, layer templates.Layer, text
 		float64(layer.Region.X+layer.Region.Width/2),
 		float64(layer.Region.Y+layer.Region.Height/2),
 		0.5, 0.5)
-}
-
-// setupFont configures the drawing context font
-func (r *Renderer) setupFont(dc *gg.Context, font *templates.Font, vars map[string]string) error {
-	// Get font size
-	size := 12.0
-	if font.Size != nil {
-		switch s := font.Size.(type) {
-		case int:
-			size = float64(s)
-		case float64:
-			size = s
-		case string:
-			resolved := r.substituteVariables(s, vars)
-			if parsed, err := strconv.ParseFloat(resolved, 64); err == nil {
-				size = parsed
-			}
-		}
-	}
-
-	// Debug: print the font size being used
-	fmt.Printf("DEBUG: Setting font size to %.1f for layer\n", size)
-
-	// Create a proper font face using Go's font system
-	f, err := truetype.Parse(goregular.TTF)
-	if err != nil {
-		return fmt.Errorf("failed to parse font: %v", err)
-	}
-
-	face := truetype.NewFace(f, &truetype.Options{
-		Size: size,
-		DPI:  72, // Match the card DPI for proper scaling
-	})
-
-	dc.SetFontFace(face)
-
-	// Set color
-	if font.Color != "" {
-		colorStr := r.substituteVariables(font.Color, vars)
-		if c, err := r.parseColor(colorStr); err == nil {
-			dc.SetColor(c)
-		} else {
-			dc.SetColor(color.Black) // Fallback
-		}
-	} else {
-		dc.SetColor(color.Black) // Default color
-	}
-
-	return nil
 }
 
 // substituteVariables replaces {{variable}} patterns with actual values
@@ -569,45 +533,6 @@ func (r *Renderer) stripMarkdownHeaders(content string) string {
 	return strings.Join(cleanLines, "\n")
 }
 
-// drawMultilineText draws text with proper line break handling, word wrap, and auto font scaling
-func (r *Renderer) drawMultilineText(dc *gg.Context, content string, x, y, w, h float64, align string) {
-	if content == "" {
-		return
-	}
-
-	// Get current font size for scaling
-	currentSize := r.getCurrentFontSize(dc)
-	minSize := 8.0 // Minimum readable font size
-
-	// Try to fit the text, scaling down if necessary
-	for attempt := 0; attempt < 10; attempt++ {
-		// Apply word wrapping
-		wrappedLines := r.wrapText(dc, content, w)
-
-		// Calculate line height based on current font metrics
-		_, lineHeight := dc.MeasureString("Tg")
-		lineHeight *= 1.2 // Add line spacing
-
-		// Check if text fits in the available height
-		totalTextHeight := float64(len(wrappedLines)) * lineHeight
-
-		if totalTextHeight <= h || currentSize <= minSize {
-			// Text fits or we've reached minimum size, render it
-			r.renderWrappedText(dc, wrappedLines, x, y, w, h, lineHeight, align)
-			break
-		}
-
-		// Text doesn't fit, scale down font
-		currentSize *= 0.9
-		if currentSize < minSize {
-			currentSize = minSize
-		}
-
-		// Update font with new size
-		r.scaleFontTo(dc, nil, currentSize)
-	}
-}
-
 // evaluateCondition evaluates a simple condition
 func (r *Renderer) evaluateCondition(condition string, vars map[string]string) bool {
 	// Simple condition evaluation - check if variables exist and are non-empty
@@ -650,109 +575,6 @@ func (r *Renderer) parseColor(colorStr string) (color.Color, error) {
 }
 
 // getCurrentFontSize extracts the current font size from the drawing context
-func (r *Renderer) getCurrentFontSize(dc *gg.Context) float64 {
-	// Since we can't access the font face directly, we'll measure a standard character
-	// This is an approximation but should work for our purposes
-	_, h := dc.MeasureString("M")
-	return h * 0.8 // Approximate font size from character height
-}
-
-// wrapText wraps text to fit within the given width
-func (r *Renderer) wrapText(dc *gg.Context, text string, maxWidth float64) []string {
-	lines := strings.Split(text, "\n")
-	var wrappedLines []string
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			wrappedLines = append(wrappedLines, "")
-			continue
-		}
-
-		// Check if the line fits as-is
-		w, _ := dc.MeasureString(line)
-		if w <= maxWidth {
-			wrappedLines = append(wrappedLines, line)
-			continue
-		}
-
-		// Need to wrap this line
-		words := strings.Fields(line)
-		if len(words) == 0 {
-			continue
-		}
-
-		currentLine := words[0]
-		for i := 1; i < len(words); i++ {
-			testLine := currentLine + " " + words[i]
-			w, _ := dc.MeasureString(testLine)
-
-			if w <= maxWidth {
-				currentLine = testLine
-			} else {
-				// This word doesn't fit, start a new line
-				wrappedLines = append(wrappedLines, currentLine)
-				currentLine = words[i]
-			}
-		}
-
-		// Add the last line
-		if currentLine != "" {
-			wrappedLines = append(wrappedLines, currentLine)
-		}
-	}
-
-	return wrappedLines
-}
-
-// renderWrappedText renders the wrapped text lines
-func (r *Renderer) renderWrappedText(dc *gg.Context, lines []string, x, y, w, h, lineHeight float64, align string) {
-	if len(lines) == 0 {
-		return
-	}
-
-	// Calculate starting Y position to center the text block vertically
-	totalTextHeight := float64(len(lines)) * lineHeight
-	startY := y + (h-totalTextHeight)/2 + lineHeight*0.8 // Adjust for baseline
-
-	// Draw each line
-	for i, line := range lines {
-		lineY := startY + float64(i)*lineHeight
-
-		// Skip empty lines but still advance the position
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-
-		// Adjust X position based on alignment
-		switch align {
-		case "right":
-			dc.DrawStringAnchored(line, x+w, lineY, 1.0, 0.0)
-		case "center":
-			dc.DrawStringAnchored(line, x+w/2, lineY, 0.5, 0.0)
-		default: // left
-			dc.DrawStringAnchored(line, x, lineY, 0.0, 0.0)
-		}
-	}
-}
-
-// scaleFontTo scales the font to a specific size
-func (r *Renderer) scaleFontTo(dc *gg.Context, originalFace interface{}, newSize float64) {
-	// Since we can't access the font face directly, we'll recreate it
-	// This is a limitation of the gg library - we'll use our standard font
-	f, err := truetype.Parse(goregular.TTF)
-	if err != nil {
-		return // Keep current font on error
-	}
-
-	face := truetype.NewFace(f, &truetype.Options{
-		Size: newSize,
-		DPI:  72,
-	})
-
-	dc.SetFontFace(face)
-}
-
 // drawFormattedText renders formatted markdown text with proper styling
 func (r *Renderer) drawFormattedText(dc *gg.Context, lines []FormattedLine, x, y, w, h float64, align string, baseFont *templates.Font, vars map[string]string) {
 	if len(lines) == 0 {
@@ -937,8 +759,9 @@ func (r *Renderer) wrapFormattedSegments(dc *gg.Context, segments []FormattedTex
 
 // renderWrappedFormattedLine renders a single wrapped line with formatted segments
 func (r *Renderer) renderWrappedFormattedLine(dc *gg.Context, segments []FormattedText, x, y, w, baseSize float64, baseColor color.Color, align string) float64 {
+	// Check if this is an empty line (paragraph break)
 	if len(segments) == 0 {
-		return y + baseSize*1.2
+		return y + baseSize*1.8 // Extra spacing for paragraph breaks
 	}
 
 	// Calculate total width of the line for alignment
@@ -970,8 +793,10 @@ func (r *Renderer) renderWrappedFormattedLine(dc *gg.Context, segments []Formatt
 		currentX += segmentWidth
 	}
 
-	return y + baseSize*1.2
-} // combineSegments combines formatted segments into plain text
+	return y + baseSize*1.5 // Increased line spacing for better readability
+}
+
+// combineSegments combines formatted segments into plain text
 func (r *Renderer) combineSegments(segments []FormattedText) string {
 	var result strings.Builder
 	for _, segment := range segments {
