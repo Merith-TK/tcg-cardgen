@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Merith-TK/tcg-cardgen/internal/templates"
+	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
 	"github.com/fogleman/gg"
 )
 

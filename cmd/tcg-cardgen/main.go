@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Merith-TK/tcg-cardgen/pkg/cardgen"
+	"github.com/Merith-TK/tcg-cardgen/pkg/types"
 )
 
 func main() {
@@ -23,7 +24,7 @@ func main() {
 
 	if *listTemplates {
 		// Initialize template manager to discover cardstyles
-		generator := cardgen.NewGenerator(&cardgen.Config{
+		generator := cardgen.NewGenerator(&types.Config{
 			TemplateDir: *templateDir,
 		})
 
@@ -43,7 +44,7 @@ func main() {
 	inputPath := args[0]
 
 	// Initialize the card generator
-	generator := cardgen.NewGenerator(&cardgen.Config{
+	generator := cardgen.NewGenerator(&types.Config{
 		TemplateDir:  *templateDir,
 		OutputDir:    *outputDir,
 		ValidateOnly: *validateOnly,
@@ -104,7 +105,7 @@ func listAvailableCardstyles(generator *cardgen.Generator) error {
 	fmt.Println()
 
 	// Group by TCG
-	tcgGroups := make(map[string][]cardgen.CardStyleInfo)
+	tcgGroups := make(map[string][]types.CardStyleInfo)
 	for _, style := range cardstyles {
 		tcgGroups[style.TCG] = append(tcgGroups[style.TCG], style)
 	}

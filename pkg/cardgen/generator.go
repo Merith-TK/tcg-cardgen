@@ -5,29 +5,22 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Merith-TK/tcg-cardgen/internal/metadata"
-	"github.com/Merith-TK/tcg-cardgen/internal/renderer"
-	"github.com/Merith-TK/tcg-cardgen/internal/templates"
+	"github.com/Merith-TK/tcg-cardgen/pkg/metadata"
+	"github.com/Merith-TK/tcg-cardgen/pkg/renderer"
+	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
+	"github.com/Merith-TK/tcg-cardgen/pkg/types"
 )
-
-// Config holds configuration for the card generator
-type Config struct {
-	TemplateDir  string
-	OutputDir    string
-	ValidateOnly bool
-	Verbose      bool
-}
 
 // Generator handles card generation
 type Generator struct {
-	config          *Config
+	config          *types.Config
 	templateManager *templates.Manager
 	metadataParser  *metadata.Parser
 	renderer        *renderer.Renderer
 }
 
 // NewGenerator creates a new card generator with the given config
-func NewGenerator(config *Config) *Generator {
+func NewGenerator(config *types.Config) *Generator {
 	if config.OutputDir == "" {
 		config.OutputDir = ".tcg-cardgen-out"
 	}
@@ -101,28 +94,17 @@ func (g *Generator) GenerateCard(filePath string) error {
 	return nil
 }
 
-// CardStyleInfo represents information about a discovered cardstyle (exported version)
-type CardStyleInfo struct {
-	TCG         string
-	Name        string
-	DisplayName string
-	Description string
-	Version     string
-	Source      string // "built-in" or path to custom cardstyle
-	Extends     string // Base template it extends
-}
-
 // ListCardstyles discovers and lists all available cardstyles
-func (g *Generator) ListCardstyles() ([]CardStyleInfo, error) {
+func (g *Generator) ListCardstyles() ([]types.CardStyleInfo, error) {
 	templateInfos, err := g.templateManager.ListAvailableCardstyles()
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert internal CardStyleInfo to exported version
-	cardstyles := make([]CardStyleInfo, len(templateInfos))
+	// Convert template CardStyleInfo to common types version
+	cardstyles := make([]types.CardStyleInfo, len(templateInfos))
 	for i, info := range templateInfos {
-		cardstyles[i] = CardStyleInfo{
+		cardstyles[i] = types.CardStyleInfo{
 			TCG:         info.TCG,
 			Name:        info.Name,
 			DisplayName: info.DisplayName,

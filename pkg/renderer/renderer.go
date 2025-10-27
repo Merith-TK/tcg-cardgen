@@ -7,8 +7,8 @@ import (
 
 	"github.com/fogleman/gg"
 
-	"github.com/Merith-TK/tcg-cardgen/internal/metadata"
-	"github.com/Merith-TK/tcg-cardgen/internal/templates"
+	"github.com/Merith-TK/tcg-cardgen/pkg/metadata"
+	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
 )
 
 // Renderer handles image generation from templates and card data

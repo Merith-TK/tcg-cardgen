@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Merith-TK/tcg-cardgen/internal/metadata"
+	"github.com/Merith-TK/tcg-cardgen/pkg/metadata"
 	"gopkg.in/yaml.v3"
 )
 

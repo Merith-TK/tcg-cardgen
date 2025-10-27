@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Merith-TK/tcg-cardgen/internal/metadata"
-	"github.com/Merith-TK/tcg-cardgen/internal/templates"
+	"github.com/Merith-TK/tcg-cardgen/pkg/metadata"
+	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
 )
 
 // VariableProcessor handles template variable building and substitution

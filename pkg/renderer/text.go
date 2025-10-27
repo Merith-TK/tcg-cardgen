@@ -11,7 +11,7 @@ import (
 	"golang.org/x/image/font/gofont/goitalic"
 	"golang.org/x/image/font/gofont/goregular"
 
-	"github.com/Merith-TK/tcg-cardgen/internal/templates"
+	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
 )
 
 // TextStyle represents text formatting options
