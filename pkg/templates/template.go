@@ -61,7 +61,7 @@ type Dimensions struct {
 type Layer struct {
 	Name         string `yaml:"name"`
 	Role         string `yaml:"role,omitempty"` // Semantic role (title, artwork, etc.)
-	Type         string `yaml:"type"`           // "image", "text"
+	Type         string `yaml:"type"`           // "image", "text", "shape"
 	Source       string `yaml:"source,omitempty"`
 	Content      string `yaml:"content,omitempty"`
 	Region       Region `yaml:"region"`
@@ -72,6 +72,17 @@ type Layer struct {
 	Condition    string `yaml:"condition,omitempty"`
 	Align        string `yaml:"align,omitempty"`
 	Fallback     string `yaml:"fallback,omitempty"`
+
+	// Text-specific fields
+	TextType string `yaml:"text_type,omitempty"` // "static", "dynamic"
+
+	// Shape-specific fields
+	Shape        string      `yaml:"shape,omitempty"`         // "rectangle", "circle", "polygon"
+	Fill         string      `yaml:"fill,omitempty"`          // RGBA color: "#RRGGBBAA"
+	Stroke       string      `yaml:"stroke,omitempty"`        // RGBA color: "#RRGGBBAA"
+	StrokeWidth  float64     `yaml:"stroke_width,omitempty"`  // Stroke width in pixels
+	CornerRadius float64     `yaml:"corner_radius,omitempty"` // For rounded rectangles
+	Points       [][]float64 `yaml:"points,omitempty"`        // For polygons: [[x,y], [x,y], ...]
 }
 
 // Region defines a rectangular area on the card

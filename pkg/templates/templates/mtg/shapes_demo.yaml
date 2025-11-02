@@ -1,0 +1,223 @@
+name: "MTG Shapes Demo"
+tcg: "mtg"
+version: "1.0.0"
+description: "Demonstration of programmatic shape generation in MTG cards"
+
+# Standard TCG dimensions at 300 DPI
+dimensions:
+  width: 750   # 2.5" at 300 DPI
+  height: 1050 # 3.5" at 300 DPI
+  dpi: 300
+
+# MTG-specific required fields
+required_fields:
+  - card.tcg
+  - card.title
+  - card.type
+
+# Optional fields with smart defaults
+optional_fields:
+  mtg.cmc: 0
+  mtg.power: null
+  mtg.toughness: null
+  mtg.color: "red"           # Color for demo
+  card.rarity: "common"
+  card.artist: "Shape Generator"
+
+# Template layers demonstrating shapes
+layers:
+  # Background rectangle with corner radius
+  - name: "card_background"
+    type: "shape"
+    shape: "rectangle"
+    region: { x: 0, y: 0, width: 750, height: 1050 }
+    fill: "#F5F5F5FF"        # Light gray background
+    stroke: "#333333FF"      # Dark border
+    stroke_width: 3
+    corner_radius: 15
+    
+  # Header background with gradient effect (using semi-transparent overlay)
+  - name: "header_background"
+    type: "shape"
+    shape: "rectangle"
+    region: { x: 20, y: 20, width: 710, height: 100 }
+    fill: "#FF6B6B80"        # Semi-transparent red
+    stroke: "#D63031FF"      # Solid red border
+    stroke_width: 2
+    corner_radius: 10
+    
+  # Mana cost circles
+  - name: "mana_circle_1"
+    type: "shape"
+    shape: "circle"
+    region: { x: 600, y: 40, width: 40, height: 40 }
+    fill: "#FF0000FF"        # Red mana
+    stroke: "#FFFFFFFF"      # White border
+    stroke_width: 2
+    
+  - name: "mana_circle_2"
+    type: "shape"
+    shape: "circle"
+    region: { x: 650, y: 40, width: 40, height: 40 }
+    fill: "#CCCCCCFF"        # Colorless mana
+    stroke: "#666666FF"      # Gray border
+    stroke_width: 2
+    
+  # Artwork placeholder rectangle
+  - name: "artwork_frame"
+    type: "shape"
+    shape: "rectangle"
+    region: { x: 60, y: 140, width: 630, height: 400 }
+    fill: "#E8E8E8FF"        # Light placeholder color
+    stroke: "#999999FF"      # Medium gray border
+    stroke_width: 2
+    corner_radius: 8
+    
+  # Type line background
+  - name: "type_line_bg"
+    type: "shape"
+    shape: "rectangle"
+    region: { x: 40, y: 560, width: 670, height: 40 }
+    fill: "#74B9FFFF"        # Light blue
+    stroke: "#0984E3FF"      # Darker blue border
+    stroke_width: 1
+    corner_radius: 5
+    
+  # Rules text background
+  - name: "rules_text_bg"
+    type: "shape"
+    shape: "rectangle"
+    region: { x: 40, y: 620, width: 670, height: 280 }
+    fill: "#FDCB6EFF"        # Light yellow
+    stroke: "#E17055FF"      # Orange border
+    stroke_width: 1
+    corner_radius: 5
+    
+  # Power/Toughness diamond shape
+  - name: "power_toughness_bg"
+    type: "shape"
+    shape: "polygon"
+    region: { x: 620, y: 920, width: 100, height: 80 }
+    # Diamond shape using relative coordinates (0-100)
+    points: [[50, 0], [100, 40], [50, 100], [0, 40]]
+    fill: "#00B894FF"        # Green
+    stroke: "#00A085FF"      # Darker green
+    stroke_width: 3
+    
+  # Rarity gem (smaller diamond)
+  - name: "rarity_gem"
+    type: "shape"
+    shape: "polygon"
+    region: { x: 360, y: 500, width: 30, height: 30 }
+    # Small diamond for rarity
+    points: [[50, 0], [100, 50], [50, 100], [0, 50]]
+    fill: "#FDCB6EFF"        # Gold for common
+    stroke: "#E17055FF"      # Orange border
+    stroke_width: 2
+    
+  # Decorative corner elements (small circles)
+  - name: "corner_decoration_1"
+    type: "shape"
+    shape: "circle"
+    region: { x: 30, y: 30, width: 15, height: 15 }
+    fill: "#6C5CE7FF"        # Purple
+    stroke: "#5F3DC4FF"      # Darker purple
+    stroke_width: 1
+    
+  - name: "corner_decoration_2"
+    type: "shape"
+    shape: "circle"
+    region: { x: 705, y: 30, width: 15, height: 15 }
+    fill: "#6C5CE7FF"
+    stroke: "#5F3DC4FF"
+    stroke_width: 1
+    
+  - name: "corner_decoration_3"
+    type: "shape"
+    shape: "circle"
+    region: { x: 30, y: 1005, width: 15, height: 15 }
+    fill: "#6C5CE7FF"
+    stroke: "#5F3DC4FF"
+    stroke_width: 1
+    
+  - name: "corner_decoration_4"
+    type: "shape"
+    shape: "circle"
+    region: { x: 705, y: 1005, width: 15, height: 15 }
+    fill: "#6C5CE7FF"
+    stroke: "#5F3DC4FF"
+    stroke_width: 1
+    
+  # Text layers (static examples)
+  - name: "title"
+    type: "text"
+    text_type: "dynamic"
+    content: "{{card.title}}"
+    region: { x: 60, y: 50, width: 500, height: 40 }
+    font: 
+      family: "Arial"
+      size: 24
+      weight: "bold"
+      color: "#FFFFFFFF"      # White text for contrast
+    
+  - name: "mana_cost_text"
+    type: "text"
+    text_type: "static"
+    content: "2R"
+    region: { x: 600, y: 95, width: 90, height: 20 }
+    font:
+      family: "Arial"
+      size: 14
+      weight: "bold"
+      color: "#333333FF"
+    align: "center"
+    
+  - name: "type_line"
+    type: "text"
+    text_type: "dynamic"
+    content: "{{card.type}}"
+    region: { x: 60, y: 570, width: 630, height: 20 }
+    font:
+      family: "Arial"
+      size: 16
+      weight: "bold"
+      color: "#FFFFFFFF"
+    
+  - name: "rules_text"
+    type: "text"
+    text_type: "static"
+    content: "This card demonstrates programmatic shape generation. Shapes are drawn using RGBA colors and can be rectangles, circles, ellipses, or custom polygons."
+    region: { x: 60, y: 640, width: 630, height: 200 }
+    font:
+      family: "Arial"
+      size: 14
+      color: "#333333FF"
+    
+  - name: "power_toughness"
+    type: "text"
+    text_type: "static"
+    content: "3/3"
+    region: { x: 620, y: 940, width: 100, height: 40 }
+    font:
+      family: "Arial"
+      size: 20
+      weight: "bold"
+      color: "#FFFFFFFF"
+    align: "center"
+    
+  - name: "artist_credit"
+    type: "text"
+    text_type: "dynamic"
+    content: "{{card.artist}}"
+    region: { x: 60, y: 920, width: 300, height: 20 }
+    font:
+      family: "Arial"
+      size: 12
+      style: "italic"
+      color: "#666666FF"
+
+# No style tokens needed for this demo
+style_tokens: {}
+
+# No icons needed for this demo
+icons: {}

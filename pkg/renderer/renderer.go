@@ -70,6 +70,8 @@ func (r *Renderer) renderLayer(dc *gg.Context, layer templates.Layer, vars map[s
 		return r.renderImageLayer(dc, layer, vars)
 	case "text":
 		return r.renderTextLayer(dc, layer, vars, template)
+	case "shape":
+		return r.renderShapeLayer(dc, layer, vars)
 	default:
 		return fmt.Errorf("unknown layer type: %s", layer.Type)
 	}

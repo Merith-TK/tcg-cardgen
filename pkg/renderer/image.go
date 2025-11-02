@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
@@ -24,7 +25,7 @@ func NewImageProcessor() *ImageProcessor {
 	}
 }
 
-// LoadImage loads an image with caching (supports local files and URLs)
+// LoadImage loads an image with caching (supports local files, URLs, and SVG)
 func (ip *ImageProcessor) LoadImage(path string) (image.Image, error) {
 	// Check cache first
 	if img, exists := ip.cache[path]; exists {
@@ -43,8 +44,14 @@ func (ip *ImageProcessor) LoadImage(path string) (image.Image, error) {
 			return nil, fmt.Errorf("image file not found: %s", path)
 		}
 
-		// Load local image
-		img, err = gg.LoadImage(path)
+		// Check if it's an SVG file
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".svg" {
+			img, err = ip.loadSVG(path)
+		} else {
+			// Load regular image (PNG, JPG, etc.)
+			img, err = gg.LoadImage(path)
+		}
 	}
 
 	if err != nil {
@@ -54,6 +61,14 @@ func (ip *ImageProcessor) LoadImage(path string) (image.Image, error) {
 	// Cache it
 	ip.cache[path] = img
 	return img, nil
+}
+
+// loadSVG loads an SVG file and rasterizes it to a bitmap
+// For now, this is a placeholder - you'd need an SVG library like github.com/srwiley/oksvg
+func (ip *ImageProcessor) loadSVG(path string) (image.Image, error) {
+	// TODO: Implement SVG loading with oksvg or similar library
+	// For now, return an error to indicate SVG support needs implementation
+	return nil, fmt.Errorf("SVG support not yet implemented - please use PNG/JPG for: %s", path)
 }
 
 // downloadImage downloads an image from a URL
