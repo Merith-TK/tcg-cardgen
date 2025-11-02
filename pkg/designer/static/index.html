@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="icon" href="/static/assets/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="app-title">🎨 {{.Title}}</h1>
+                <span class="version">v{{.Version}}</span>
+            </div>
+            <div class="header-center">
+                <span class="template-name" id="templateName">New Template</span>
+            </div>
+            <div class="header-right">
+                <button class="btn btn-secondary" id="loadBtn">📁 Load</button>
+                <button class="btn btn-primary" id="saveBtn">💾 Save</button>
+                <button class="btn btn-accent" id="exportBtn">📦 Export</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Left Panel: Layers & Tools -->
+            <aside class="left-panel">
+                <!-- Template Properties -->
+                <section class="panel-section">
+                    <h3 class="panel-title">📋 Template</h3>
+                    <div class="form-group">
+                        <label for="templateTcg">TCG:</label>
+                        <select id="templateTcg" class="form-control">
+                            <option value="mtg">Magic: The Gathering</option>
+                            <option value="pokemon">Pokémon</option>
+                            <option value="custom">Custom TCG</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="templateNameInput">Name:</label>
+                        <input type="text" id="templateNameInput" class="form-control" placeholder="my_awesome_template">
+                    </div>
+                    <div class="form-group">
+                        <label for="templateVersion">Version:</label>
+                        <input type="text" id="templateVersion" class="form-control" value="1.0.0">
+                    </div>
+                    <div class="form-group">
+                        <label for="templateDescription">Description:</label>
+                        <textarea id="templateDescription" class="form-control" rows="2" placeholder="Describe your template..."></textarea>
+                    </div>
+                </section>
+
+                <!-- Layer Management -->
+                <section class="panel-section">
+                    <h3 class="panel-title">📑 Layers</h3>
+                    <div class="layer-controls">
+                        <button class="btn btn-small btn-primary" id="addTextBtn">📝 Text</button>
+                        <button class="btn btn-small btn-primary" id="addShapeBtn">🟦 Shape</button>
+                        <button class="btn btn-small btn-primary" id="addImageBtn">🖼️ Image</button>
+                    </div>
+                    <div class="layer-list" id="layerList">
+                        <!-- Layers will be populated by JavaScript -->
+                    </div>
+                </section>
+            </aside>
+
+            <!-- Center: Canvas -->
+            <div class="canvas-container">
+                <div class="canvas-toolbar">
+                    <button class="btn btn-small" id="zoomInBtn">🔍+</button>
+                    <span class="zoom-level" id="zoomLevel">100%</span>
+                    <button class="btn btn-small" id="zoomOutBtn">🔍-</button>
+                    <button class="btn btn-small" id="fitBtn">⏹️ Fit</button>
+                    <div class="spacer"></div>
+                    <button class="btn btn-small" id="gridBtn">⊞ Grid</button>
+                    <button class="btn btn-small" id="previewBtn">👁️ Preview</button>
+                </div>
+                <div class="canvas-wrapper">
+                    <canvas id="designCanvas" width="750" height="1050"></canvas>
+                    <canvas id="overlayCanvas" width="750" height="1050"></canvas>
+                </div>
+            </div>
+
+            <!-- Right Panel: Properties -->
+            <aside class="right-panel">
+                <section class="panel-section">
+                    <h3 class="panel-title">⚙️ Properties</h3>
+                    <div id="propertiesContent">
+                        <p class="empty-state">Select a layer to edit properties</p>
+                    </div>
+                </section>
+
+                <!-- Card Preview -->
+                <section class="panel-section">
+                    <h3 class="panel-title">👁️ Preview</h3>
+                    <div class="preview-container">
+                        <canvas id="previewCanvas" width="150" height="210"></canvas>
+                        <div class="preview-controls">
+                            <button class="btn btn-small btn-primary" id="generatePreviewBtn">🔄 Update</button>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </main>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <div class="status-left">
+                <span id="statusText">Ready</span>
+            </div>
+            <div class="status-right">
+                <span id="cursorPos">x: 0, y: 0</span>
+                <span class="separator">|</span>
+                <span id="canvasSize">750 × 1050</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Load Template Modal -->
+    <div class="modal" id="loadModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📁 Load Template</h3>
+                <button class="modal-close" id="loadModalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="template-list" id="templateList">
+                    <!-- Templates will be populated by JavaScript -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="loadCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="loadConfirmBtn" disabled>Load</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Modal -->
+    <div class="modal" id="exportModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📦 Export Template</h3>
+                <button class="modal-close" id="exportModalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>
+                        <input type="radio" name="exportFormat" value="yaml" checked>
+                        YAML File Only
+                    </label>
+                    <p class="help-text">Export just the template YAML file</p>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="radio" name="exportFormat" value="package">
+                        Full Package (.tcgpack)
+                    </label>
+                    <p class="help-text">Export with assets for sharing</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="exportCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="exportConfirmBtn">Export</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/utils.js"></script>
+    <script src="/static/js/canvas.js"></script>
+    <script src="/static/js/layers.js"></script>
+    <script src="/static/js/properties.js"></script>
+    <script src="/static/js/templates.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
