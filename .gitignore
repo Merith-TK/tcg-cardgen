@@ -1,3 +1,4 @@
 */.tcg-cardgen-out
 /.tcg-cardstyles
 *.exe
+/tmp

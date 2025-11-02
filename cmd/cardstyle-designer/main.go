@@ -12,7 +12,7 @@ import (
 
 func main() {
 	var (
-		port = flag.String("port", "8080", "Port to serve on")
+		port = flag.String("port", "3000", "Port to serve on")
 		host = flag.String("host", "localhost", "Host to bind to")
 		help = flag.Bool("help", false, "Show help")
 	)

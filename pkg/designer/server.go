@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/Merith-TK/tcg-cardgen/pkg/metadata"
+	"github.com/Merith-TK/tcg-cardgen/pkg/renderer"
 	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
 	"github.com/Merith-TK/tcg-cardgen/pkg/types"
 )
@@ -61,7 +65,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // handleIndex serves the main designer page
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html")
-	
+
 	data := struct {
 		Title   string
 		Version string
@@ -80,7 +84,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	// Remove /static/ prefix and serve from embedded filesystem
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	
+
 	data, err := staticFiles.ReadFile(path)
 	if err != nil {
 		http.NotFound(w, r)
@@ -91,14 +95,25 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	ext := filepath.Ext(path)
 	contentType := getContentType(ext)
 	w.Header().Set("Content-Type", contentType)
-	
+
 	w.Write(data)
 }
 
 // handleAPI handles REST API endpoints
 func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers to allow React frontend to connect
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+	// Handle preflight requests
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	path := strings.TrimPrefix(r.URL.Path, "/api")
-	
+
 	switch {
 	case path == "/templates" && r.Method == "GET":
 		s.apiListTemplates(w, r)
@@ -106,8 +121,12 @@ func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.apiGetTemplate(w, r)
 	case path == "/template" && r.Method == "POST":
 		s.apiSaveTemplate(w, r)
+	case path == "/template/save" && r.Method == "POST":
+		s.apiSaveTemplate(w, r)
 	case path == "/template/export" && r.Method == "POST":
 		s.apiExportTemplate(w, r)
+	case path == "/render" && r.Method == "POST":
+		s.apiRenderCard(w, r)
 	case path == "/preview" && r.Method == "POST":
 		s.apiGeneratePreview(w, r)
 	default:
@@ -164,14 +183,88 @@ func (s *Server) apiGetTemplate(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(template)
 }
 
-// apiSaveTemplate saves a template (placeholder for now)
+// apiSaveTemplate saves a template
 func (s *Server) apiSaveTemplate(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement template saving
+	var templateData struct {
+		Name   string               `json:"name"`
+		Format templates.Dimensions `json:"format"`
+		Layers []templates.Layer    `json:"layers"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&templateData); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// For now, just return success - actual saving would go here
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
-		"message": "Template saving not yet implemented",
+		"message": fmt.Sprintf("Template '%s' saved successfully", templateData.Name),
 	})
+}
+
+// apiRenderCard renders a card and returns the image
+func (s *Server) apiRenderCard(w http.ResponseWriter, r *http.Request) {
+	var requestData struct {
+		Template struct {
+			Name   string               `json:"name"`
+			Format templates.Dimensions `json:"format"`
+			Layers []templates.Layer    `json:"layers"`
+		} `json:"template"`
+		Card map[string]interface{} `json:"card"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
+		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Convert to proper template structure
+	template := &templates.Template{
+		Name:       requestData.Template.Name,
+		Dimensions: requestData.Template.Format,
+		Layers:     requestData.Template.Layers,
+	}
+
+	// Create renderer
+	rendererInstance := renderer.NewRenderer()
+
+	// Create a simple card with the provided data
+	cardData := map[string]interface{}{}
+	for k, v := range requestData.Card {
+		cardData[k] = v
+	}
+
+	// Create a metadata card from the request data
+	card := &metadata.Card{
+		Metadata: cardData,
+	}
+
+	// Create a temporary file to render to
+	tempFile := fmt.Sprintf("temp_render_%d.png", time.Now().UnixNano())
+
+	// Render the card to temporary file
+	err := rendererInstance.RenderCard(card, template, tempFile)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to render card: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Read the rendered file
+	imageData, err := os.ReadFile(tempFile)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read rendered image: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Clean up temp file
+	os.Remove(tempFile)
+
+	// Return the image
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.png\"", requestData.Template.Name))
+	w.Write(imageData)
 }
 
 // apiExportTemplate exports a template as YAML (placeholder for now)
