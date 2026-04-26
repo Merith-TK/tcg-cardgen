@@ -1,17 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { fabric } from 'fabric'
+    import React, { useEffect, useRef, useState } from 'react'
+import { Canvas, Rect, Circle, Textbox, FabricText, FabricImage } from 'fabric'
 
 function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdateLayer }) {
   const canvasRef = useRef(null)
   const fabricCanvas = useRef(null)
   const [zoom, setZoom] = useState(1)
   const objectMap = useRef(new Map()) // Map layer IDs to fabric objects
+  const isUpdatingFromCanvas = useRef(false) // Flag to prevent rebuild during canvas updates
 
   useEffect(() => {
     if (canvasRef.current && !fabricCanvas.current) {
       try {
         // Initialize Fabric.js canvas
-        fabricCanvas.current = new fabric.Canvas(canvasRef.current, {
+        fabricCanvas.current = new Canvas(canvasRef.current, {
           width: template.format.width,
           height: template.format.height,
           backgroundColor: '#ffffff',
@@ -55,8 +56,6 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
               height: Math.round((obj.height || 0) * (obj.scaleY || 1))
             }
             
-            onUpdateLayer(obj.layerId, { region: newRegion })
-            
             // Reset scale and update object dimensions
             obj.set({
               width: newRegion.width,
@@ -65,6 +64,10 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
               scaleY: 1
             })
             fabricCanvas.current.renderAll()
+            
+            // Update the layer data without triggering canvas rebuild
+            console.log('Canvas: updating layer', obj.layerId, 'to region', newRegion)
+            onUpdateLayer(obj.layerId, { region: newRegion })
           }
         })
 
@@ -96,6 +99,8 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
   // Update canvas when layers change
   useEffect(() => {
     if (!fabricCanvas.current) return
+    
+    console.log('Canvas: rebuilding with', layers.length, 'layers')
 
     // Clear existing objects
     fabricCanvas.current.clear()
@@ -109,7 +114,7 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
 
       switch (layer.type) {
         case 'text':
-          fabricObject = new fabric.Text(layer.content || 'New Text', {
+          fabricObject = new Textbox(layer.content || 'New Text', {
             left: layer.region.x,
             top: layer.region.y,
             width: layer.region.width,
@@ -124,7 +129,7 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
         case 'shape':
           if (layer.shape === 'circle') {
             const radius = Math.min(layer.region.width, layer.region.height) / 2
-            fabricObject = new fabric.Circle({
+            fabricObject = new Circle({
               left: layer.region.x,
               top: layer.region.y,
               radius: radius,
@@ -133,7 +138,7 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
               strokeWidth: layer.stroke_width || 1
             })
           } else {
-            fabricObject = new fabric.Rect({
+            fabricObject = new Rect({
               left: layer.region.x,
               top: layer.region.y,
               width: layer.region.width,
@@ -149,7 +154,7 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
 
         case 'image':
           if (layer.src) {
-            fabric.Image.fromURL(layer.src, (img) => {
+            FabricImage.fromURL(layer.src).then((img) => {
               img.set({
                 left: layer.region.x,
                 top: layer.region.y,
@@ -159,11 +164,13 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
               img.scaleToHeight(layer.region.height)
               fabricCanvas.current.add(img)
               objectMap.current.set(layer.id, img)
+            }).catch(error => {
+              console.error('Error loading image:', error)
             })
             return // Skip the normal add process for images
           } else {
             // Placeholder for image without src
-            fabricObject = new fabric.Rect({
+            fabricObject = new Rect({
               left: layer.region.x,
               top: layer.region.y,
               width: layer.region.width,
@@ -175,7 +182,7 @@ function CanvasEditor({ template, layers, selectedLayer, onSelectLayer, onUpdate
             })
             
             // Add "Image" text
-            const placeholderText = new fabric.Text('📷 Image', {
+            const placeholderText = new FabricText('📷 Image', {
               left: layer.region.x + layer.region.width / 2,
               top: layer.region.y + layer.region.height / 2,
               fontSize: 16,

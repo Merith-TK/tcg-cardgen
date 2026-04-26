@@ -1,6 +1,8 @@
 import React from 'react'
 
 function LayerPanel({ layers, selectedLayer, onSelectLayer, onUpdateLayer, onDeleteLayer }) {
+  console.log('LayerPanel: rendering with', layers.length, 'layers', layers.map(l => l.id))
+  
   const getLayerIcon = (type) => {
     switch (type) {
       case 'text': return '📝'

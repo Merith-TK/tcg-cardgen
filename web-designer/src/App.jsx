@@ -93,11 +93,23 @@ function App() {
   }
 
   const updateLayer = (layerId, updates) => {
-    const updatedLayers = layers.map(layer => 
-      layer.id === layerId ? { ...layer, ...updates } : layer
-    )
-    setLayers(updatedLayers)
-    setTemplate(prev => ({ ...prev, layers: updatedLayers }))
+    console.log('updateLayer called:', layerId, updates)
+    
+    setLayers(currentLayers => {
+      console.log('Current layers in setter:', currentLayers.length, 'layers')
+      const updatedLayers = currentLayers.map(layer => 
+        layer.id === layerId ? { ...layer, ...updates } : layer
+      )
+      console.log('Updated layers:', updatedLayers.length, 'layers')
+      return updatedLayers
+    })
+    
+    setTemplate(prev => {
+      const updatedLayers = prev.layers.map(layer => 
+        layer.id === layerId ? { ...layer, ...updates } : layer
+      )
+      return { ...prev, layers: updatedLayers }
+    })
     
     if (selectedLayer && selectedLayer.id === layerId) {
       setSelectedLayer({ ...selectedLayer, ...updates })
