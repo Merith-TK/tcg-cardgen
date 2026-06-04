@@ -8,179 +8,133 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
-	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
+	"github.com/Merith-TK/tcg-cardgen/pkg/types"
 	"github.com/fogleman/gg"
 )
 
-// ImageProcessor handles all image-related operations
-type ImageProcessor struct {
-	cache map[string]image.Image
-}
+// ─── global image cache ───────────────────────────────────────────────────────
 
-// NewImageProcessor creates a new image processor
-func NewImageProcessor() *ImageProcessor {
-	return &ImageProcessor{
-		cache: make(map[string]image.Image),
-	}
-}
+var (
+	imageCache   sync.Map // map[string]image.Image
+)
 
-// LoadImage loads an image with caching (supports local files, URLs, and SVG)
-func (ip *ImageProcessor) LoadImage(path string) (image.Image, error) {
-	// Check cache first
-	if img, exists := ip.cache[path]; exists {
-		return img, nil
+// loadImage loads an image from a local path or HTTP/HTTPS URL with
+// process-lifetime caching.
+func loadImage(path string) (image.Image, error) {
+	if v, ok := imageCache.Load(path); ok {
+		return v.(image.Image), nil
 	}
 
 	var img image.Image
 	var err error
 
-	// Check if it's a URL
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		img, err = ip.downloadImage(path)
+		img, err = downloadImage(path)
 	} else {
-		// Check if local file exists
-		if _, err := os.Stat(path); os.IsNotExist(err) {
-			return nil, fmt.Errorf("image file not found: %s", path)
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("image not found: %s", path)
 		}
-
-		// Check if it's an SVG file
 		ext := strings.ToLower(filepath.Ext(path))
 		if ext == ".svg" {
-			img, err = ip.loadSVG(path)
-		} else {
-			// Load regular image (PNG, JPG, etc.)
-			img, err = gg.LoadImage(path)
+			return nil, fmt.Errorf("SVG not yet supported (use PNG/JPG): %s", path)
 		}
+		img, err = gg.LoadImage(path)
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache it
-	ip.cache[path] = img
+	imageCache.Store(path, img)
 	return img, nil
 }
 
-// loadSVG loads an SVG file and rasterizes it to a bitmap
-// For now, this is a placeholder - you'd need an SVG library like github.com/srwiley/oksvg
-func (ip *ImageProcessor) loadSVG(path string) (image.Image, error) {
-	// TODO: Implement SVG loading with oksvg or similar library
-	// For now, return an error to indicate SVG support needs implementation
-	return nil, fmt.Errorf("SVG support not yet implemented - please use PNG/JPG for: %s", path)
-}
-
-// downloadImage downloads an image from a URL
-func (ip *ImageProcessor) downloadImage(url string) (image.Image, error) {
-	resp, err := http.Get(url)
+// downloadImage downloads an image from a URL.
+func downloadImage(url string) (image.Image, error) {
+	resp, err := http.Get(url) // #nosec G107 — URL is intentionally user-supplied
 	if err != nil {
-		return nil, fmt.Errorf("failed to download image: %v", err)
+		return nil, fmt.Errorf("download %s: %w", url, err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("download %s: HTTP %d", url, resp.StatusCode)
 	}
-
-	// Decode the image
 	img, _, err := image.Decode(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode image: %v", err)
+		return nil, fmt.Errorf("decode %s: %w", url, err)
 	}
-
 	return img, nil
 }
 
-// CreateFittedImage creates a new image that fits the specified region with the given fit mode
-func (ip *ImageProcessor) CreateFittedImage(img image.Image, region templates.Region, fitMode string) image.Image {
-	imgBounds := img.Bounds()
-	imgWidth := float64(imgBounds.Dx())
-	imgHeight := float64(imgBounds.Dy())
+// createFittedImage scales/crops an image to fit a region.
+func createFittedImage(img image.Image, region types.Region, fitMode string) image.Image {
+	bounds := img.Bounds()
+	iw := float64(bounds.Dx())
+	ih := float64(bounds.Dy())
+	rw := float64(region.Width)
+	rh := float64(region.Height)
 
-	regionWidth := float64(region.Width)
-	regionHeight := float64(region.Height)
-
-	// Create a new image context for the fitted result
-	fittedDC := gg.NewContext(region.Width, region.Height)
+	dc := gg.NewContext(region.Width, region.Height)
 
 	switch fitMode {
-	case "fill": // Scale to fill region completely, crop if necessary
-		// Calculate scaling to fill the region (crop if necessary)
-		scaleX := regionWidth / imgWidth
-		scaleY := regionHeight / imgHeight
-		scale := scaleX
-		if scaleY > scaleX {
-			scale = scaleY // Use larger scale to fill region completely
+	case "fill":
+		sx := rw / iw
+		sy := rh / ih
+		s := sx
+		if sy > sx {
+			s = sy
 		}
+		dc.Scale(s, s)
+		dx := (rw/s - iw) / 2
+		dy := (rh/s - ih) / 2
+		dc.DrawImage(img, int(dx), int(dy))
 
-		// Calculate scaled dimensions
-		scaledWidth := imgWidth * scale
-		scaledHeight := imgHeight * scale
-
-		// Calculate position to center the scaled image
-		drawX := (regionWidth - scaledWidth) / 2
-		drawY := (regionHeight - scaledHeight) / 2
-
-		// Scale and draw the image
-		fittedDC.Scale(scale, scale)
-		fittedDC.DrawImageAnchored(img, int(drawX/scale+imgWidth/2), int(drawY/scale+imgHeight/2), 0.5, 0.5)
-
-	case "fit": // Scale to fit entirely within region, may leave empty space
-		// Calculate scaling to fit within the region
-		scaleX := regionWidth / imgWidth
-		scaleY := regionHeight / imgHeight
-		scale := scaleX
-		if scaleY < scaleX {
-			scale = scaleY // Use smaller scale to fit entirely
+	case "fit":
+		sx := rw / iw
+		sy := rh / ih
+		s := sx
+		if sy < sx {
+			s = sy
 		}
+		dc.Scale(s, s)
+		dx := (rw/s - iw) / 2
+		dy := (rh/s - ih) / 2
+		dc.DrawImage(img, int(dx), int(dy))
 
-		// Calculate scaled dimensions
-		scaledWidth := imgWidth * scale
-		scaledHeight := imgHeight * scale
+	case "stretch":
+		dc.ScaleAbout(rw/iw, rh/ih, 0, 0)
+		dc.DrawImage(img, 0, 0)
 
-		// Calculate position to center the scaled image
-		drawX := (regionWidth - scaledWidth) / 2
-		drawY := (regionHeight - scaledHeight) / 2
+	case "center":
+		dx := (rw - iw) / 2
+		dy := (rh - ih) / 2
+		dc.DrawImage(img, int(dx), int(dy))
 
-		// Scale and draw the image
-		fittedDC.Scale(scale, scale)
-		fittedDC.DrawImageAnchored(img, int(drawX/scale+imgWidth/2), int(drawY/scale+imgHeight/2), 0.5, 0.5)
-
-	case "stretch": // Stretch to exact region dimensions (may distort)
-		fittedDC.DrawImageAnchored(img, region.Width/2, region.Height/2, 0.5, 0.5)
-
-	case "center": // No scaling, just center (may crop or leave empty space)
-		drawX := (regionWidth - imgWidth) / 2
-		drawY := (regionHeight - imgHeight) / 2
-		fittedDC.DrawImageAnchored(img, int(drawX+imgWidth/2), int(drawY+imgHeight/2), 0.5, 0.5)
-
-	default: // Default to fill
-		return ip.CreateFittedImage(img, region, "fill")
+	default:
+		return createFittedImage(img, region, "fill")
 	}
 
-	return fittedDC.Image()
+	return dc.Image()
 }
 
-// RenderPlaceholder renders a placeholder rectangle with text
-func (ip *ImageProcessor) RenderPlaceholder(dc *gg.Context, layer templates.Layer, text string) {
-	// Draw placeholder rectangle
+// renderPlaceholder draws a grey placeholder rectangle with a label.
+func renderPlaceholder(dc *gg.Context, layer types.Layer, label string) {
+	x := float64(layer.Region.X)
+	y := float64(layer.Region.Y)
+	w := float64(layer.Region.Width)
+	h := float64(layer.Region.Height)
+
 	dc.SetColor(color.RGBA{200, 200, 200, 255})
-	dc.DrawRectangle(float64(layer.Region.X), float64(layer.Region.Y),
-		float64(layer.Region.Width), float64(layer.Region.Height))
+	dc.DrawRectangle(x, y, w, h)
 	dc.Fill()
 
-	// Draw border
 	dc.SetColor(color.RGBA{100, 100, 100, 255})
 	dc.SetLineWidth(2)
-	dc.DrawRectangle(float64(layer.Region.X), float64(layer.Region.Y),
-		float64(layer.Region.Width), float64(layer.Region.Height))
+	dc.DrawRectangle(x, y, w, h)
 	dc.Stroke()
 
-	// Draw text
 	dc.SetColor(color.RGBA{50, 50, 50, 255})
-	dc.DrawStringAnchored(text,
-		float64(layer.Region.X+layer.Region.Width/2),
-		float64(layer.Region.Y+layer.Region.Height/2),
-		0.5, 0.5)
+	dc.DrawStringAnchored(label, x+w/2, y+h/2, 0.5, 0.5)
 }

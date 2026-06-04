@@ -4,183 +4,83 @@ import (
 	"fmt"
 	"image/color"
 	"math"
-	"strconv"
 	"strings"
 
+	"github.com/Merith-TK/tcg-cardgen/pkg/expr"
+	"github.com/Merith-TK/tcg-cardgen/pkg/types"
 	"github.com/fogleman/gg"
-
-	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
 )
 
-// renderShapeLayer renders a shape layer
-func (r *Renderer) renderShapeLayer(dc *gg.Context, layer templates.Layer, vars map[string]string) error {
-	// Resolve colors with variable substitution
-	fillColor := r.variableProcessor.SubstituteVariables(layer.Fill, vars)
-	strokeColor := r.variableProcessor.SubstituteVariables(layer.Stroke, vars)
+func renderShapeLayer(dc *gg.Context, layer types.Layer, proc *expr.Processor, vars map[string]string) error {
+	fill := proc.Substitute(layer.Fill)
+	stroke := proc.Substitute(layer.Stroke)
 
-	// Get region
-	region := layer.Region
-	x := float64(region.X)
-	y := float64(region.Y)
-	w := float64(region.Width)
-	h := float64(region.Height)
+	x := float64(layer.Region.X)
+	y := float64(layer.Region.Y)
+	w := float64(layer.Region.Width)
+	h := float64(layer.Region.Height)
 
-	// Draw the shape
 	switch layer.Shape {
 	case "rectangle":
-		return r.renderRectangle(dc, x, y, w, h, layer.CornerRadius, fillColor, strokeColor, layer.StrokeWidth)
+		return renderRect(dc, x, y, w, h, layer.CornerRadius, fill, stroke, layer.StrokeWidth)
 	case "circle":
-		return r.renderCircle(dc, x, y, w, h, fillColor, strokeColor, layer.StrokeWidth)
+		return renderCircle(dc, x, y, w, h, fill, stroke, layer.StrokeWidth)
 	case "ellipse":
-		return r.renderEllipse(dc, x, y, w, h, fillColor, strokeColor, layer.StrokeWidth)
+		return renderEllipse(dc, x, y, w, h, fill, stroke, layer.StrokeWidth)
 	case "polygon":
-		return r.renderPolygon(dc, x, y, w, h, layer.Points, fillColor, strokeColor, layer.StrokeWidth)
+		return renderPolygon(dc, x, y, w, h, layer.Points, fill, stroke, layer.StrokeWidth)
 	default:
-		return fmt.Errorf("unknown shape type: %s", layer.Shape)
+		return fmt.Errorf("unknown shape %q", layer.Shape)
 	}
 }
 
-// renderRectangle renders a rectangle or rounded rectangle
-func (r *Renderer) renderRectangle(dc *gg.Context, x, y, w, h, cornerRadius float64, fill, stroke string, strokeWidth float64) error {
-	if cornerRadius > 0 {
-		dc.DrawRoundedRectangle(x, y, w, h, cornerRadius)
+func renderRect(dc *gg.Context, x, y, w, h, radius float64, fill, stroke string, strokeWidth float64) error {
+	if radius > 0 {
+		dc.DrawRoundedRectangle(x, y, w, h, radius)
 	} else {
 		dc.DrawRectangle(x, y, w, h)
 	}
-
-	// Fill if color specified
-	if fill != "" {
-		fillCol, err := parseRGBAColor(fill)
-		if err != nil {
-			return fmt.Errorf("invalid fill color: %v", err)
-		}
-		dc.SetColor(fillCol)
-		if stroke != "" {
-			dc.FillPreserve() // Preserve path for stroke
-		} else {
-			dc.Fill()
-		}
-	}
-
-	// Stroke if color specified
-	if stroke != "" && strokeWidth > 0 {
-		strokeCol, err := parseRGBAColor(stroke)
-		if err != nil {
-			return fmt.Errorf("invalid stroke color: %v", err)
-		}
-		dc.SetColor(strokeCol)
-		dc.SetLineWidth(strokeWidth)
-		dc.Stroke()
-	}
-
-	return nil
+	return applyFillStroke(dc, fill, stroke, strokeWidth)
 }
 
-// renderCircle renders a circle (using the smaller dimension for radius)
-func (r *Renderer) renderCircle(dc *gg.Context, x, y, w, h float64, fill, stroke string, strokeWidth float64) error {
-	// Use smaller dimension for radius to fit within region
-	radius := math.Min(w, h) / 2
-	centerX := x + w/2
-	centerY := y + h/2
-
-	dc.DrawCircle(centerX, centerY, radius)
-
-	// Fill if color specified
-	if fill != "" {
-		fillCol, err := parseRGBAColor(fill)
-		if err != nil {
-			return fmt.Errorf("invalid fill color: %v", err)
-		}
-		dc.SetColor(fillCol)
-		if stroke != "" {
-			dc.FillPreserve()
-		} else {
-			dc.Fill()
-		}
-	}
-
-	// Stroke if color specified
-	if stroke != "" && strokeWidth > 0 {
-		strokeCol, err := parseRGBAColor(stroke)
-		if err != nil {
-			return fmt.Errorf("invalid stroke color: %v", err)
-		}
-		dc.SetColor(strokeCol)
-		dc.SetLineWidth(strokeWidth)
-		dc.Stroke()
-	}
-
-	return nil
+func renderCircle(dc *gg.Context, x, y, w, h float64, fill, stroke string, strokeWidth float64) error {
+	r := math.Min(w, h) / 2
+	dc.DrawCircle(x+w/2, y+h/2, r)
+	return applyFillStroke(dc, fill, stroke, strokeWidth)
 }
 
-// renderEllipse renders an ellipse
-func (r *Renderer) renderEllipse(dc *gg.Context, x, y, w, h float64, fill, stroke string, strokeWidth float64) error {
-	centerX := x + w/2
-	centerY := y + h/2
-	radiusX := w / 2
-	radiusY := h / 2
-
-	dc.DrawEllipse(centerX, centerY, radiusX, radiusY)
-
-	// Fill if color specified
-	if fill != "" {
-		fillCol, err := parseRGBAColor(fill)
-		if err != nil {
-			return fmt.Errorf("invalid fill color: %v", err)
-		}
-		dc.SetColor(fillCol)
-		if stroke != "" {
-			dc.FillPreserve()
-		} else {
-			dc.Fill()
-		}
-	}
-
-	// Stroke if color specified
-	if stroke != "" && strokeWidth > 0 {
-		strokeCol, err := parseRGBAColor(stroke)
-		if err != nil {
-			return fmt.Errorf("invalid stroke color: %v", err)
-		}
-		dc.SetColor(strokeCol)
-		dc.SetLineWidth(strokeWidth)
-		dc.Stroke()
-	}
-
-	return nil
+func renderEllipse(dc *gg.Context, x, y, w, h float64, fill, stroke string, strokeWidth float64) error {
+	dc.DrawEllipse(x+w/2, y+h/2, w/2, h/2)
+	return applyFillStroke(dc, fill, stroke, strokeWidth)
 }
 
-// renderPolygon renders a polygon from points
-func (r *Renderer) renderPolygon(dc *gg.Context, x, y, w, h float64, points [][]float64, fill, stroke string, strokeWidth float64) error {
+func renderPolygon(dc *gg.Context, x, y, w, h float64, points [][]float64, fill, stroke string, strokeWidth float64) error {
 	if len(points) < 3 {
-		return fmt.Errorf("polygon needs at least 3 points")
+		return fmt.Errorf("polygon needs at least 3 points, got %d", len(points))
 	}
-
-	// Scale points to region (points are relative to region dimensions)
-	for i, point := range points {
-		if len(point) != 2 {
-			return fmt.Errorf("polygon point %d must have x,y coordinates", i)
+	for i, pt := range points {
+		if len(pt) != 2 {
+			return fmt.Errorf("point %d must have 2 coordinates", i)
 		}
-
-		// Scale relative coordinates to actual region
-		scaledX := x + (point[0]/100.0)*w // Assume points are 0-100 relative
-		scaledY := y + (point[1]/100.0)*h
-
+		px := x + (pt[0]/100.0)*w
+		py := y + (pt[1]/100.0)*h
 		if i == 0 {
-			dc.MoveTo(scaledX, scaledY)
+			dc.MoveTo(px, py)
 		} else {
-			dc.LineTo(scaledX, scaledY)
+			dc.LineTo(px, py)
 		}
 	}
 	dc.ClosePath()
+	return applyFillStroke(dc, fill, stroke, strokeWidth)
+}
 
-	// Fill if color specified
+func applyFillStroke(dc *gg.Context, fill, stroke string, strokeWidth float64) error {
 	if fill != "" {
-		fillCol, err := parseRGBAColor(fill)
+		c, err := parseColor(fill)
 		if err != nil {
-			return fmt.Errorf("invalid fill color: %v", err)
+			return fmt.Errorf("fill color: %w", err)
 		}
-		dc.SetColor(fillCol)
+		dc.SetColor(c)
 		if stroke != "" {
 			dc.FillPreserve()
 		} else {
@@ -188,13 +88,12 @@ func (r *Renderer) renderPolygon(dc *gg.Context, x, y, w, h float64, points [][]
 		}
 	}
 
-	// Stroke if color specified
 	if stroke != "" && strokeWidth > 0 {
-		strokeCol, err := parseRGBAColor(stroke)
+		c, err := parseColor(stroke)
 		if err != nil {
-			return fmt.Errorf("invalid stroke color: %v", err)
+			return fmt.Errorf("stroke color: %w", err)
 		}
-		dc.SetColor(strokeCol)
+		dc.SetColor(c)
 		dc.SetLineWidth(strokeWidth)
 		dc.Stroke()
 	}
@@ -202,98 +101,85 @@ func (r *Renderer) renderPolygon(dc *gg.Context, x, y, w, h float64, points [][]
 	return nil
 }
 
-// parseRGBAColor parses RGBA color strings
-// Supports formats: "#RRGGBB", "#RRGGBBAA", "#RGB", "#RGBA"
-func parseRGBAColor(colorStr string) (color.Color, error) {
-	if !strings.HasPrefix(colorStr, "#") {
-		return nil, fmt.Errorf("color must start with #")
+// ─── color parsing ─────────────────────────────────────────────────────────────
+
+// parseColor parses #RGB, #RGBA, #RRGGBB, #RRGGBBAA hex color strings.
+func parseColor(s string) (color.Color, error) {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "#") {
+		return nil, fmt.Errorf("color must start with #, got %q", s)
 	}
 
-	hex := colorStr[1:]
+	hex := s[1:]
+	var r, g, b, a uint8 = 0, 0, 0, 255
 
-	var r, g, b, a uint8 = 0, 0, 0, 255 // Default alpha to fully opaque
+	parseHex1 := func(h string) (uint8, error) {
+		var v uint64
+		_, err := fmt.Sscanf(h, "%x", &v)
+		if err != nil || v > 15 {
+			return 0, fmt.Errorf("invalid hex nibble %q", h)
+		}
+		return uint8(v * 17), nil
+	}
+	parseHex2 := func(h string) (uint8, error) {
+		var v uint64
+		_, err := fmt.Sscanf(h, "%x", &v)
+		if err != nil || v > 255 {
+			return 0, fmt.Errorf("invalid hex byte %q", h)
+		}
+		return uint8(v), nil
+	}
 
+	var err error
 	switch len(hex) {
-	case 3: // #RGB
-		if rv, err := strconv.ParseUint(hex[0:1], 16, 8); err == nil {
-			r = uint8(rv * 17) // Convert single hex digit to full byte
-		} else {
-			return nil, fmt.Errorf("invalid red component")
+	case 3:
+		if r, err = parseHex1(hex[0:1]); err != nil {
+			return nil, err
 		}
-		if gv, err := strconv.ParseUint(hex[1:2], 16, 8); err == nil {
-			g = uint8(gv * 17)
-		} else {
-			return nil, fmt.Errorf("invalid green component")
+		if g, err = parseHex1(hex[1:2]); err != nil {
+			return nil, err
 		}
-		if bv, err := strconv.ParseUint(hex[2:3], 16, 8); err == nil {
-			b = uint8(bv * 17)
-		} else {
-			return nil, fmt.Errorf("invalid blue component")
+		if b, err = parseHex1(hex[2:3]); err != nil {
+			return nil, err
 		}
-
-	case 4: // #RGBA
-		if rv, err := strconv.ParseUint(hex[0:1], 16, 8); err == nil {
-			r = uint8(rv * 17)
-		} else {
-			return nil, fmt.Errorf("invalid red component")
+	case 4:
+		if r, err = parseHex1(hex[0:1]); err != nil {
+			return nil, err
 		}
-		if gv, err := strconv.ParseUint(hex[1:2], 16, 8); err == nil {
-			g = uint8(gv * 17)
-		} else {
-			return nil, fmt.Errorf("invalid green component")
+		if g, err = parseHex1(hex[1:2]); err != nil {
+			return nil, err
 		}
-		if bv, err := strconv.ParseUint(hex[2:3], 16, 8); err == nil {
-			b = uint8(bv * 17)
-		} else {
-			return nil, fmt.Errorf("invalid blue component")
+		if b, err = parseHex1(hex[2:3]); err != nil {
+			return nil, err
 		}
-		if av, err := strconv.ParseUint(hex[3:4], 16, 8); err == nil {
-			a = uint8(av * 17)
-		} else {
-			return nil, fmt.Errorf("invalid alpha component")
+		if a, err = parseHex1(hex[3:4]); err != nil {
+			return nil, err
 		}
-
-	case 6: // #RRGGBB
-		if rv, err := strconv.ParseUint(hex[0:2], 16, 8); err == nil {
-			r = uint8(rv)
-		} else {
-			return nil, fmt.Errorf("invalid red component")
+	case 6:
+		if r, err = parseHex2(hex[0:2]); err != nil {
+			return nil, err
 		}
-		if gv, err := strconv.ParseUint(hex[2:4], 16, 8); err == nil {
-			g = uint8(gv)
-		} else {
-			return nil, fmt.Errorf("invalid green component")
+		if g, err = parseHex2(hex[2:4]); err != nil {
+			return nil, err
 		}
-		if bv, err := strconv.ParseUint(hex[4:6], 16, 8); err == nil {
-			b = uint8(bv)
-		} else {
-			return nil, fmt.Errorf("invalid blue component")
+		if b, err = parseHex2(hex[4:6]); err != nil {
+			return nil, err
 		}
-
-	case 8: // #RRGGBBAA
-		if rv, err := strconv.ParseUint(hex[0:2], 16, 8); err == nil {
-			r = uint8(rv)
-		} else {
-			return nil, fmt.Errorf("invalid red component")
+	case 8:
+		if r, err = parseHex2(hex[0:2]); err != nil {
+			return nil, err
 		}
-		if gv, err := strconv.ParseUint(hex[2:4], 16, 8); err == nil {
-			g = uint8(gv)
-		} else {
-			return nil, fmt.Errorf("invalid green component")
+		if g, err = parseHex2(hex[2:4]); err != nil {
+			return nil, err
 		}
-		if bv, err := strconv.ParseUint(hex[4:6], 16, 8); err == nil {
-			b = uint8(bv)
-		} else {
-			return nil, fmt.Errorf("invalid blue component")
+		if b, err = parseHex2(hex[4:6]); err != nil {
+			return nil, err
 		}
-		if av, err := strconv.ParseUint(hex[6:8], 16, 8); err == nil {
-			a = uint8(av)
-		} else {
-			return nil, fmt.Errorf("invalid alpha component")
+		if a, err = parseHex2(hex[6:8]); err != nil {
+			return nil, err
 		}
-
 	default:
-		return nil, fmt.Errorf("invalid color format: expected #RGB, #RGBA, #RRGGBB, or #RRGGBBAA")
+		return nil, fmt.Errorf("unsupported color format %q (expected #RGB, #RGBA, #RRGGBB, #RRGGBBAA)", s)
 	}
 
 	return color.RGBA{R: r, G: g, B: b, A: a}, nil

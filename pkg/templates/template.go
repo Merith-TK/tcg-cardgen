@@ -1,3 +1,12 @@
+// Package templates handles loading, caching, inheritance, and validation of
+// card style template YAML files.
+//
+// Template search order (first match wins):
+//  1. Workspace: .tcg-cardstyles/<tcg>/<name>.yaml
+//  2. User:      $HOME/.tcg-cardgen/cardstyles/<tcg>/<name>.yaml
+//  3. User:      $HOME/.tcg-cardgen/cardstyles/<name>.yaml  (TCG from file metadata)
+//  4. Custom:    <customTemplateDir>/<tcg>/<name>.yaml       (legacy --template-dir flag)
+//  5. Embedded:  compiled-in built-in templates
 package templates
 
 import (
@@ -7,826 +16,590 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Merith-TK/tcg-cardgen/pkg/metadata"
+	"github.com/Merith-TK/tcg-cardgen/pkg/card"
+	"github.com/Merith-TK/tcg-cardgen/pkg/types"
 	"gopkg.in/yaml.v3"
 )
 
-// Embed built-in templates into the binary
+// Embed built-in templates into the binary.
 //
 //go:embed templates/*
 var builtinTemplates embed.FS
 
-// Template represents a card template definition
+// Template is a fully-resolved card style template ready for rendering.
 type Template struct {
-	Name        string                 `yaml:"name"`
-	TCG         string                 `yaml:"tcg"`
-	Version     string                 `yaml:"version"`
-	Description string                 `yaml:"description"`
-	Extends     string                 `yaml:"extends,omitempty"` // Path to base template
-	Dimensions  Dimensions             `yaml:"dimensions"`
-	Layers      []Layer                `yaml:"layers"`
+	Name        string `yaml:"name"`
+	TCG         string `yaml:"tcg"`
+	Version     string `yaml:"version"`
+	Description string `yaml:"description"`
+	// Extends is a relative or absolute path to a base template file.
+	// After loading, all inheritance is already merged into this struct.
+	Extends string `yaml:"extends,omitempty"`
+
+	Dimensions  types.Dimensions       `yaml:"dimensions"`
+	Layers      []types.Layer          `yaml:"layers"`
 	Required    []string               `yaml:"required_fields"`
 	Optional    map[string]interface{} `yaml:"optional_fields"`
 	Icons       map[string]string      `yaml:"icons"`
-	StyleTokens map[string]string      `yaml:"style_tokens"`                // Visual constants
-	Overrides   []LayerOverride        `yaml:"overrides,omitempty"`         // Layer modifications
-	AddLayers   []Layer                `yaml:"additional_layers,omitempty"` // Extra layers
-	Conditions  []Condition            `yaml:"conditions,omitempty"`        // Conditional includes
+	StyleTokens map[string]string      `yaml:"style_tokens"`
+	// Overrides patches named layers from the base template.
+	Overrides []types.LayerOverride `yaml:"overrides,omitempty"`
+	// AddLayers are appended after all inherited layers.
+	AddLayers []types.Layer `yaml:"additional_layers,omitempty"`
 
-	// Runtime info
-	TemplateDir  string    `yaml:"-"`
-	BaseTemplate *Template `yaml:"-"` // Resolved base template
+	// TemplateDir is the real on-disk directory containing this template.
+	// Always an OS path; never the virtual embed:// path.
+	TemplateDir string `yaml:"-"`
 }
 
-// LayerOverride represents modifications to existing layers
-type LayerOverride struct {
-	Layer   string                 `yaml:"layer"`   // Name of layer to modify
-	Updates map[string]interface{} `yaml:",inline"` // Fields to update
-}
-
-// Condition represents conditional template inclusion
-type Condition struct {
-	If      string `yaml:"if"`      // Condition expression
-	Include string `yaml:"include"` // Template file to include
-}
-
-// Dimensions defines the output image dimensions
-type Dimensions struct {
-	Width  int `yaml:"width"`
-	Height int `yaml:"height"`
-	DPI    int `yaml:"dpi"`
-}
-
-// Layer represents a single layer in the card template
-type Layer struct {
-	Name         string `yaml:"name"`
-	Role         string `yaml:"role,omitempty"` // Semantic role (title, artwork, etc.)
-	Type         string `yaml:"type"`           // "image", "text", "shape"
-	Source       string `yaml:"source,omitempty"`
-	Content      string `yaml:"content,omitempty"`
-	Region       Region `yaml:"region"`
-	Font         *Font  `yaml:"font,omitempty"`
-	FitMode      string `yaml:"fit_mode,omitempty"` // Image fit mode: "fill", "fit", "stretch", "center"
-	IconReplace  bool   `yaml:"icon_replace,omitempty"`
-	StripHeaders bool   `yaml:"strip_headers,omitempty"`
-	Condition    string `yaml:"condition,omitempty"`
-	Align        string `yaml:"align,omitempty"`
-	Fallback     string `yaml:"fallback,omitempty"`
-
-	// Text-specific fields
-	TextType string `yaml:"text_type,omitempty"` // "static", "dynamic"
-
-	// Shape-specific fields
-	Shape        string      `yaml:"shape,omitempty"`         // "rectangle", "circle", "polygon"
-	Fill         string      `yaml:"fill,omitempty"`          // RGBA color: "#RRGGBBAA"
-	Stroke       string      `yaml:"stroke,omitempty"`        // RGBA color: "#RRGGBBAA"
-	StrokeWidth  float64     `yaml:"stroke_width,omitempty"`  // Stroke width in pixels
-	CornerRadius float64     `yaml:"corner_radius,omitempty"` // For rounded rectangles
-	Points       [][]float64 `yaml:"points,omitempty"`        // For polygons: [[x,y], [x,y], ...]
-}
-
-// Region defines a rectangular area on the card
-type Region struct {
-	X      int `yaml:"x"`
-	Y      int `yaml:"y"`
-	Width  int `yaml:"width"`
-	Height int `yaml:"height"`
-}
-
-// Font defines text rendering properties
-type Font struct {
-	Family string      `yaml:"family"`
-	Size   interface{} `yaml:"size"` // Can be int or string template
-	Weight string      `yaml:"weight,omitempty"`
-	Style  string      `yaml:"style,omitempty"`
-	Color  string      `yaml:"color"`
-}
-
-// Manager handles template loading and management
+// Manager loads and caches card style templates.
 type Manager struct {
-	customTemplateDir  string
-	customCardstyleDir string
-	templates          map[string]*Template
+	customTemplateDir  string // legacy --template-dir flag
+	customCardstyleDir string // $HOME/.tcg-cardgen/cardstyles
+	cache              map[string]*Template
+	// embeddedExtractDir is set the first time we need a real path for an
+	// embedded template asset; it holds a temp dir with extracted files.
+	embeddedExtractDir string
 }
 
-// NewManager creates a new template manager
+// NewManager creates a Manager.  customTemplateDir may be empty.
 func NewManager(customTemplateDir string) *Manager {
-	// Set up custom cardstyle directory
-	homeDir, _ := os.UserHomeDir()
-	customCardstyleDir := filepath.Join(homeDir, ".tcg-cardgen", "cardstyles")
-
+	home, _ := os.UserHomeDir()
 	return &Manager{
 		customTemplateDir:  customTemplateDir,
-		customCardstyleDir: customCardstyleDir,
-		templates:          make(map[string]*Template),
+		customCardstyleDir: filepath.Join(home, ".tcg-cardgen", "cardstyles"),
+		cache:              make(map[string]*Template),
 	}
 }
 
-// LoadTemplate loads a template by TCG and cardstyle name
-func (m *Manager) LoadTemplate(tcg, cardstyle string) (*Template, error) {
-	key := fmt.Sprintf("%s/%s", tcg, cardstyle)
+// ─── public API ──────────────────────────────────────────────────────────────
 
-	// Check cache first
-	if template, exists := m.templates[key]; exists {
-		return template, nil
+// LoadTemplate loads (or returns from cache) the template for the given TCG and
+// card style name.
+func (m *Manager) LoadTemplate(tcg, name string) (*Template, error) {
+	key := tcg + "/" + name
+	if t, ok := m.cache[key]; ok {
+		return t, nil
 	}
-
-	template, err := m.findAndLoadTemplate(tcg, cardstyle)
+	t, err := m.findAndLoad(tcg, name)
 	if err != nil {
-		return nil, fmt.Errorf("cardstyle %s/%s not found: %v", tcg, cardstyle, err)
+		return nil, fmt.Errorf("cardstyle %s/%s: %w", tcg, name, err)
 	}
-
-	m.templates[key] = template
-	return template, nil
+	m.cache[key] = t
+	return t, nil
 }
 
-// findAndLoadTemplate searches for a template in various locations
-func (m *Manager) findAndLoadTemplate(tcg, cardstyle string) (*Template, error) {
-	// Search order (first found gets priority):
-	// 1. Workspace cardstyles: templates/tcg/cardstyle.yaml (project-specific)
-	// 2. User cardstyles: $HOME/.tcg-cardgen/cardstyles/tcg/cardstyle.yaml
-	// 3. User cardstyles: $HOME/.tcg-cardgen/cardstyles/cardstyle.yaml (with TCG metadata check)
-	// 4. Legacy custom template dir: custom-dir/tcg/cardstyle.yaml (for backwards compatibility)
-	// 5. Embedded templates: templates/tcg/cardstyle.yaml (final fallback)
-
-	// 1. Workspace templates directory (project-specific cardstyles)
-	workspacePath := filepath.Join(".tcg-cardstyles", tcg, cardstyle+".yaml")
-	if template, err := m.loadAndProcessTemplate(workspacePath); err == nil {
-		return template, nil
+// ValidateCard returns an error if the card is missing required fields or the
+// TCG doesn't match.
+func (t *Template) ValidateCard(c *card.Card) error {
+	if t.TCG != "" && c.TCG != t.TCG {
+		return fmt.Errorf("card TCG %q does not match template TCG %q", c.TCG, t.TCG)
 	}
-
-	// 2. TCG-specific folder in user cardstyles
-	if m.customCardstyleDir != "" {
-		tcgPath := filepath.Join(m.customCardstyleDir, tcg, cardstyle+".yaml")
-		if template, err := m.loadAndProcessTemplate(tcgPath); err == nil {
-			return template, nil
+	for _, field := range t.Required {
+		if !hasField(c, field) {
+			return fmt.Errorf("required field %q is missing", field)
 		}
+	}
+	return nil
+}
 
-		// 3. Root level in user cardstyles (check TCG metadata)
-		rootPath := filepath.Join(m.customCardstyleDir, cardstyle+".yaml")
-		if template, err := m.loadAndProcessTemplate(rootPath); err == nil {
-			// Verify TCG matches
-			if template.TCG == tcg {
-				return template, nil
+// ListAvailableCardstyles discovers all templates across all sources.
+func (m *Manager) ListAvailableCardstyles() ([]types.CardStyleInfo, error) {
+	var all []types.CardStyleInfo
+	seen := make(map[string]bool)
+
+	add := func(styles []types.CardStyleInfo) {
+		for _, s := range styles {
+			k := s.TCG + "/" + s.Name
+			if !seen[k] {
+				all = append(all, s)
+				seen[k] = true
 			}
 		}
 	}
 
-	// 4. Legacy custom template directory (for backwards compatibility)
+	add(m.discoverDir(".tcg-cardstyles", "workspace"))
+	add(m.discoverDir(m.customCardstyleDir, "user"))
 	if m.customTemplateDir != "" {
-		templatePath := filepath.Join(m.customTemplateDir, tcg, cardstyle+".yaml")
-		if template, err := m.loadAndProcessTemplate(templatePath); err == nil {
-			return template, nil
-		}
+		add(m.discoverDir(m.customTemplateDir, "custom"))
 	}
-
-	// 5. Built-in embedded templates (final fallback)
-	return m.loadBuiltinTemplate(tcg, cardstyle)
+	add(m.discoverEmbedded())
+	return all, nil
 }
 
-// loadBuiltinTemplate loads a template from embedded builtin templates
-func (m *Manager) loadBuiltinTemplate(tcg, cardstyle string) (*Template, error) {
-	builtinPath := fmt.Sprintf("templates/%s/%s.yaml", tcg, cardstyle)
+// ─── template finding ─────────────────────────────────────────────────────────
 
-	data, err := builtinTemplates.ReadFile(builtinPath)
-	if err != nil {
-		return nil, fmt.Errorf("builtin template %s/%s not found: %v", tcg, cardstyle, err)
+func (m *Manager) findAndLoad(tcg, name string) (*Template, error) {
+	candidates := []string{
+		filepath.Join(".tcg-cardstyles", tcg, name+".yaml"),
 	}
 
-	var template Template
-	if err := yaml.Unmarshal(data, &template); err != nil {
-		return nil, fmt.Errorf("error parsing builtin template: %v", err)
+	if m.customCardstyleDir != "" {
+		candidates = append(candidates,
+			filepath.Join(m.customCardstyleDir, tcg, name+".yaml"),
+			filepath.Join(m.customCardstyleDir, name+".yaml"),
+		)
 	}
 
-	// Set template directory for builtin templates
-	template.TemplateDir = fmt.Sprintf("templates/%s", tcg) // Handle inheritance for builtin templates
-	if template.Extends != "" {
-		// For builtin templates, resolve relative extends within builtin
-		baseTemplate, err := m.resolveBuiltinBaseTemplate(template.Extends, template.TemplateDir)
+	if m.customTemplateDir != "" {
+		candidates = append(candidates,
+			filepath.Join(m.customTemplateDir, tcg, name+".yaml"),
+		)
+	}
+
+	for _, path := range candidates {
+		t, err := m.loadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load builtin base template '%s': %v", template.Extends, err)
+			continue
 		}
-		merged := m.mergeTemplates(baseTemplate, &template)
-		template = *merged
+		// Root-level user files have TCG in metadata — verify it matches.
+		if t.TCG != "" && t.TCG != tcg {
+			continue
+		}
+		return t, nil
 	}
 
-	return &template, nil
+	// Fall back to embedded.
+	return m.loadEmbedded(tcg, name)
 }
 
-// resolveBuiltinBaseTemplate resolves extends for builtin templates
-func (m *Manager) resolveBuiltinBaseTemplate(extendsPath, currentDir string) (*Template, error) {
-	// Handle relative paths within builtin templates
-	var basePath string
-	if strings.HasPrefix(extendsPath, "./") {
-		// Relative to current builtin directory
-		basePath = filepath.Join(currentDir, extendsPath[2:])
-	} else {
-		basePath = extendsPath
-	}
+// ─── file loading ─────────────────────────────────────────────────────────────
 
-	// Ensure it's still a builtin path
-	if !strings.HasPrefix(basePath, "templates/") {
-		basePath = filepath.Join("templates", basePath)
-	}
-
-	data, err := builtinTemplates.ReadFile(basePath)
+// loadFile loads a template from an OS path, resolving inheritance.
+func (m *Manager) loadFile(path string) (*Template, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+	t, err := unmarshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	t.TemplateDir = filepath.Dir(path)
 
-	var template Template
-	if err := yaml.Unmarshal(data, &template); err != nil {
-		return nil, fmt.Errorf("error parsing builtin base template: %v", err)
+	if t.Extends != "" {
+		basePath := t.Extends
+		if !filepath.IsAbs(basePath) {
+			basePath = filepath.Join(t.TemplateDir, basePath)
+		}
+		base, err := m.loadFile(basePath)
+		if err != nil {
+			return nil, fmt.Errorf("load base template %q for %s: %w", t.Extends, path, err)
+		}
+		t = merge(base, t)
+	}
+	return t, nil
+}
+
+// loadEmbedded loads a template from the embedded FS, resolving inheritance.
+func (m *Manager) loadEmbedded(tcg, name string) (*Template, error) {
+	path := fmt.Sprintf("templates/%s/%s.yaml", tcg, name)
+	data, err := builtinTemplates.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("embedded template not found")
+	}
+	t, err := unmarshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse embedded %s: %w", path, err)
 	}
 
-	template.TemplateDir = filepath.Dir(basePath)
+	// For embedded templates the TemplateDir is set to an extracted OS path
+	// the first time we need it, so asset references (fonts, icons) work.
+	t.TemplateDir = m.embeddedDir(tcg)
 
-	// Handle recursive inheritance
-	if template.Extends != "" {
-		baseTemplate, err := m.resolveBuiltinBaseTemplate(template.Extends, template.TemplateDir)
+	if t.Extends != "" {
+		base, err := m.resolveEmbeddedExtends(t.Extends, "templates/"+tcg)
+		if err != nil {
+			return nil, fmt.Errorf("load embedded base %q: %w", t.Extends, err)
+		}
+		t = merge(base, t)
+	}
+	return t, nil
+}
+
+func (m *Manager) resolveEmbeddedExtends(extendsPath, currentEmbedDir string) (*Template, error) {
+	var embedPath string
+	if strings.HasPrefix(extendsPath, "./") {
+		embedPath = currentEmbedDir + "/" + extendsPath[2:]
+	} else if strings.HasPrefix(extendsPath, "templates/") {
+		embedPath = extendsPath
+	} else {
+		embedPath = currentEmbedDir + "/" + extendsPath
+	}
+
+	data, err := builtinTemplates.ReadFile(embedPath)
+	if err != nil {
+		return nil, err
+	}
+	t, err := unmarshal(data)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(embedPath)
+	tcg := filepath.Base(dir)
+	t.TemplateDir = m.embeddedDir(tcg)
+
+	if t.Extends != "" {
+		base, err := m.resolveEmbeddedExtends(t.Extends, dir)
 		if err != nil {
 			return nil, err
 		}
-		template = *m.mergeTemplates(baseTemplate, &template)
+		t = merge(base, t)
 	}
-
-	return &template, nil
+	return t, nil
 }
 
-// loadTemplateFile loads a template from a file
-func (m *Manager) loadTemplateFile(filePath string) (*Template, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	var template Template
-	if err := yaml.Unmarshal(data, &template); err != nil {
-		return nil, fmt.Errorf("error parsing template: %v", err)
-	}
-
-	template.TemplateDir = filepath.Dir(filePath)
-	return &template, nil
-}
-
-// loadAndProcessTemplate loads a template and handles inheritance
-func (m *Manager) loadAndProcessTemplate(filePath string) (*Template, error) {
-	// Load the base template
-	template, err := m.loadTemplateFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	// If this template extends another, load and merge the base
-	if template.Extends != "" {
-		baseTemplate, err := m.resolveBaseTemplate(template.Extends, template.TemplateDir)
+// embeddedDir returns the real OS path for an embedded template's directory.
+// On first call for a given TCG it extracts the embedded assets to a temp dir.
+func (m *Manager) embeddedDir(tcg string) string {
+	if m.embeddedExtractDir == "" {
+		dir, err := os.MkdirTemp("", "tcg-cardgen-embedded-*")
 		if err != nil {
-			return nil, fmt.Errorf("failed to load base template '%s': %v", template.Extends, err)
+			// Best-effort: return a virtual path that won't resolve.
+			return "templates/" + tcg
 		}
-
-		// Merge base template into this template
-		template = m.mergeTemplates(baseTemplate, template)
+		m.embeddedExtractDir = dir
 	}
-
-	return template, nil
+	tcgDir := filepath.Join(m.embeddedExtractDir, tcg)
+	_ = os.MkdirAll(tcgDir, 0755)
+	return tcgDir
 }
 
-// resolveBaseTemplate resolves the path to a base template
-func (m *Manager) resolveBaseTemplate(extendsPath, currentDir string) (*Template, error) {
-	var basePath string
+// ─── template merging ─────────────────────────────────────────────────────────
 
-	// Handle relative paths
-	if !filepath.IsAbs(extendsPath) {
-		basePath = filepath.Join(currentDir, extendsPath)
-	} else {
-		basePath = extendsPath
-	}
-
-	// Load the base template (this will handle recursive inheritance)
-	return m.loadAndProcessTemplate(basePath)
-}
-
-// mergeTemplates merges a base template with an extending template
-func (m *Manager) mergeTemplates(base, extended *Template) *Template {
-	// Start with a copy of the extended template
+// merge produces a new template where `extended` overrides `base`.
+//
+// Merge rules:
+//   - Dimensions: extended wins if non-zero, else base.
+//   - Required fields: union of both sets.
+//   - Optional fields / StyleTokens / Icons: base provides defaults; extended overrides.
+//   - Layers: start from base layers; extended layers with the same Name replace
+//     the corresponding base layer; remaining extended layers are appended;
+//     AddLayers from extended are appended last.
+//   - Overrides from extended are applied to the final layer list.
+func merge(base, extended *Template) *Template {
 	result := *extended
-	result.BaseTemplate = base
 
-	// Merge dimensions if not set in extended
+	// Dimensions
 	if result.Dimensions.Width == 0 {
 		result.Dimensions = base.Dimensions
 	}
 
-	// Merge required fields (base + extended)
-	requiredMap := make(map[string]bool)
-	for _, field := range base.Required {
-		requiredMap[field] = true
+	// Required fields (union)
+	reqSeen := make(map[string]bool, len(base.Required)+len(extended.Required))
+	for _, f := range base.Required {
+		reqSeen[f] = true
 	}
-	for _, field := range extended.Required {
-		requiredMap[field] = true
+	for _, f := range extended.Required {
+		reqSeen[f] = true
 	}
-	result.Required = make([]string, 0, len(requiredMap))
-	for field := range requiredMap {
-		result.Required = append(result.Required, field)
+	result.Required = make([]string, 0, len(reqSeen))
+	for f := range reqSeen {
+		result.Required = append(result.Required, f)
 	}
 
-	// Merge optional fields (base defaults, extended overrides)
+	// Optional fields — base provides defaults
 	if result.Optional == nil {
 		result.Optional = make(map[string]interface{})
 	}
-	for key, value := range base.Optional {
-		if _, exists := result.Optional[key]; !exists {
-			result.Optional[key] = value
+	for k, v := range base.Optional {
+		if _, exists := result.Optional[k]; !exists {
+			result.Optional[k] = v
 		}
 	}
 
-	// Merge style tokens (base defaults, extended overrides)
+	// StyleTokens — base provides defaults
 	if result.StyleTokens == nil {
 		result.StyleTokens = make(map[string]string)
 	}
-	for key, value := range base.StyleTokens {
-		if _, exists := result.StyleTokens[key]; !exists {
-			result.StyleTokens[key] = value
+	for k, v := range base.StyleTokens {
+		if _, exists := result.StyleTokens[k]; !exists {
+			result.StyleTokens[k] = v
 		}
 	}
 
-	// Merge icons (base defaults, extended overrides)
+	// Icons — base provides defaults
 	if result.Icons == nil {
 		result.Icons = make(map[string]string)
 	}
-	for key, value := range base.Icons {
-		if _, exists := result.Icons[key]; !exists {
-			result.Icons[key] = value
+	for k, v := range base.Icons {
+		if _, exists := result.Icons[k]; !exists {
+			result.Icons[k] = v
 		}
 	}
 
-	// Handle layers - extended layers come after base layers, but can override by name
-	baseLayers := make(map[string]Layer)
-	for _, layer := range base.Layers {
-		baseLayers[layer.Name] = layer
-	}
-
-	// Apply overrides first
-	for _, override := range result.Overrides {
-		if baseLayer, exists := baseLayers[override.Layer]; exists {
-			// Apply override to base layer
-			modifiedLayer := m.applyLayerOverride(baseLayer, override)
-			baseLayers[override.Layer] = modifiedLayer
+	// Layers — extended layers override base layers by name; extra ones are appended.
+	extendedByName := make(map[string]types.Layer, len(extended.Layers))
+	for _, l := range extended.Layers {
+		if l.Name != "" {
+			extendedByName[l.Name] = l
 		}
 	}
 
-	// Build final layers list
-	finalLayers := make([]Layer, 0)
-	layerNames := make(map[string]bool)
+	var finalLayers []types.Layer
+	usedNames := make(map[string]bool)
 
-	// Add base layers first (with any overrides applied)
-	for _, layer := range base.Layers {
-		if modifiedLayer, exists := baseLayers[layer.Name]; exists {
-			finalLayers = append(finalLayers, modifiedLayer)
-			layerNames[layer.Name] = true
+	for _, bl := range base.Layers {
+		if el, ok := extendedByName[bl.Name]; ok {
+			finalLayers = append(finalLayers, el) // extended wins
+		} else {
+			finalLayers = append(finalLayers, bl)
+		}
+		usedNames[bl.Name] = true
+	}
+
+	// Append extended layers not present in base (preserving order).
+	for _, el := range extended.Layers {
+		if !usedNames[el.Name] {
+			finalLayers = append(finalLayers, el)
 		}
 	}
 
-	// Add extended layers that don't override base layers
-	for _, layer := range extended.Layers {
-		if !layerNames[layer.Name] {
-			finalLayers = append(finalLayers, layer)
+	// Apply overrides from extended.
+	for _, ov := range extended.Overrides {
+		for i, l := range finalLayers {
+			if l.Name == ov.Layer {
+				finalLayers[i] = applyOverride(l, ov)
+				break
+			}
 		}
 	}
 
-	// Add any additional layers
-	finalLayers = append(finalLayers, result.AddLayers...)
+	// Append additional layers.
+	finalLayers = append(finalLayers, extended.AddLayers...)
 
 	result.Layers = finalLayers
+	result.TemplateDir = extended.TemplateDir
 	return &result
 }
 
-// applyLayerOverride applies override settings to a layer
-func (m *Manager) applyLayerOverride(layer Layer, override LayerOverride) Layer {
-	// This is a simplified implementation - in practice you'd want to handle
-	// field-specific merging for complex nested structures
-	modified := layer
-
-	for key, value := range override.Updates {
-		switch key {
+// applyOverride patches a layer with the fields specified in the override.
+func applyOverride(l types.Layer, ov types.LayerOverride) types.Layer {
+	for k, v := range ov.Updates {
+		str, isStr := v.(string)
+		switch k {
 		case "source":
-			if str, ok := value.(string); ok {
-				modified.Source = str
+			if isStr {
+				l.Source = str
 			}
 		case "content":
-			if str, ok := value.(string); ok {
-				modified.Content = str
+			if isStr {
+				l.Content = str
 			}
 		case "condition":
-			if str, ok := value.(string); ok {
-				modified.Condition = str
+			if isStr {
+				l.Condition = str
 			}
 		case "fit_mode":
-			if str, ok := value.(string); ok {
-				modified.FitMode = str
+			if isStr {
+				l.FitMode = str
 			}
-			// Add more field overrides as needed
-		}
-	}
-
-	return modified
-}
-
-// ValidateCard validates a card against this template
-func (t *Template) ValidateCard(card *metadata.Card) error {
-	// Check TCG match
-	if card.TCG != t.TCG {
-		return fmt.Errorf("card TCG '%s' doesn't match template TCG '%s'", card.TCG, t.TCG)
-	}
-
-	// Check required fields
-	for _, field := range t.Required {
-		if !t.hasField(card, field) {
-			return fmt.Errorf("required field '%s' is missing", field)
-		}
-	}
-
-	// Special validation: card.tcg must match template TCG
-	if field := "card.tcg"; t.hasRequiredField(field) {
-		if card.TCG != t.TCG {
-			return fmt.Errorf("card TCG '%s' doesn't match template TCG '%s' - use a %s cardstyle for %s cards", card.TCG, t.TCG, card.TCG, card.TCG)
-		}
-	}
-
-	return nil
-}
-
-// hasRequiredField checks if a field is in the required list
-func (t *Template) hasRequiredField(field string) bool {
-	for _, req := range t.Required {
-		if req == field {
-			return true
-		}
-	}
-	return false
-}
-
-// hasField checks if a card has a specific field
-func (t *Template) hasField(card *metadata.Card, field string) bool {
-	switch field {
-	case "card.tcg":
-		return card.TCG != "" || t.hasNestedField(card, "card", "tcg")
-	case "card.cardstyle":
-		return card.CardStyle != "" || t.hasNestedField(card, "card", "cardstyle")
-	case "card.title":
-		return card.Title != "" || t.hasNestedField(card, "card", "title")
-	case "card.type":
-		return card.Type != "" || t.hasNestedField(card, "card", "type")
-	case "card.rarity":
-		return card.Rarity != "" || t.hasNestedField(card, "card", "rarity")
-	case "card.set":
-		return card.Set != "" || t.hasNestedField(card, "card", "set")
-	case "card.artist":
-		return card.Artist != "" || t.hasNestedField(card, "card", "artist")
-	default:
-		// Check in metadata map (both flat and nested)
-		if _, exists := card.Metadata[field]; exists {
-			return true
-		}
-
-		// Check nested field (e.g., "mtg.cmc" -> card.Metadata["mtg"]["cmc"])
-		parts := strings.Split(field, ".")
-		if len(parts) == 2 {
-			return t.hasNestedField(card, parts[0], parts[1])
-		}
-
-		return false
-	}
-}
-
-// hasNestedField checks if a nested field exists in metadata
-func (t *Template) hasNestedField(card *metadata.Card, section, field string) bool {
-	if sectionData, exists := card.Metadata[section]; exists {
-		if sectionMap, ok := sectionData.(map[string]interface{}); ok {
-			value, exists := sectionMap[field]
-			if exists {
-				// Check if the value is not nil and not empty string
-				if str, ok := value.(string); ok {
-					return str != ""
-				}
-				return value != nil
+		case "fill":
+			if isStr {
+				l.Fill = str
+			}
+		case "stroke":
+			if isStr {
+				l.Stroke = str
+			}
+		case "align":
+			if isStr {
+				l.Align = str
+			}
+		case "fallback":
+			if isStr {
+				l.Fallback = str
 			}
 		}
 	}
-	return false
+	return l
 }
 
-// CardStyleInfo represents information about a discovered cardstyle
-type CardStyleInfo struct {
-	TCG         string
-	Name        string
-	DisplayName string
-	Description string
-	Version     string
-	Source      string // "built-in" or path to custom cardstyle
-	Extends     string // Base template it extends
-}
+// ─── discovery ────────────────────────────────────────────────────────────────
 
-// ListAvailableCardstyles discovers and lists all available cardstyles
-func (m *Manager) ListAvailableCardstyles() ([]CardStyleInfo, error) {
-	var allCardstyles []CardStyleInfo
-	seen := make(map[string]bool) // Track TCG/cardstyle combinations
+func (m *Manager) discoverDir(root, source string) []types.CardStyleInfo {
+	var out []types.CardStyleInfo
 
-	// 1. Discover workspace cardstyles from templates/ directory (highest priority)
-	workspaceStyles, err := m.discoverWorkspaceCardstyles()
-	if err == nil {
-		for _, style := range workspaceStyles {
-			key := fmt.Sprintf("%s/%s", style.TCG, style.Name)
-			if !seen[key] {
-				allCardstyles = append(allCardstyles, style)
-				seen[key] = true
-			}
-		}
-	}
-
-	// 2. Discover user cardstyles from $HOME/.tcg-cardgen/cardstyles
-	if m.customCardstyleDir != "" {
-		userStyles, err := m.discoverUserCardstyles()
-		if err == nil {
-			for _, style := range userStyles {
-				key := fmt.Sprintf("%s/%s", style.TCG, style.Name)
-				if !seen[key] {
-					allCardstyles = append(allCardstyles, style)
-					seen[key] = true
-				}
-			}
-		}
-	}
-
-	// 3. Discover legacy custom templates (for backwards compatibility)
-	if m.customTemplateDir != "" {
-		legacyStyles, err := m.discoverLegacyTemplates()
-		if err == nil {
-			for _, style := range legacyStyles {
-				key := fmt.Sprintf("%s/%s", style.TCG, style.Name)
-				if !seen[key] {
-					allCardstyles = append(allCardstyles, style)
-					seen[key] = true
-				}
-			}
-		}
-	}
-
-	// 4. Discover embedded built-in cardstyles (fallback)
-	embeddedStyles, err := m.discoverEmbeddedCardstyles()
-	if err == nil {
-		for _, style := range embeddedStyles {
-			key := fmt.Sprintf("%s/%s", style.TCG, style.Name)
-			if !seen[key] {
-				allCardstyles = append(allCardstyles, style)
-				seen[key] = true
-			}
-		}
-	}
-
-	return allCardstyles, nil
-}
-
-// discoverEmbeddedCardstyles finds embedded built-in cardstyles
-func (m *Manager) discoverEmbeddedCardstyles() ([]CardStyleInfo, error) {
-	var cardstyles []CardStyleInfo
-
-	// Read the templates directory from embedded filesystem
-	entries, err := builtinTemplates.ReadDir("templates")
+	tcgDirs, err := os.ReadDir(root)
 	if err != nil {
-		return nil, err
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		tcgName := entry.Name()
-		tcgPath := "templates/" + tcgName
-
-		// Read cardstyle files in this TCG directory
-		cardstyleEntries, err := builtinTemplates.ReadDir(tcgPath)
-		if err != nil {
-			continue
-		}
-
-		for _, file := range cardstyleEntries {
-			if file.IsDir() || (!strings.HasSuffix(file.Name(), ".yaml") && !strings.HasSuffix(file.Name(), ".yml")) {
-				continue
-			}
-
-			styleName := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-
-			// Create CardStyleInfo for embedded template
-			info := &CardStyleInfo{
-				TCG:         tcgName,
-				Name:        styleName,
-				DisplayName: fmt.Sprintf("%s %s", strings.ToUpper(tcgName), strings.Title(styleName)),
-				Description: fmt.Sprintf("Built-in %s %s cardstyle", strings.ToUpper(tcgName), styleName),
-				Version:     "embedded",
-				Source:      "embedded",
-				Extends:     "", // Will be determined when loading
-			}
-
-			// Try to load the template to get extends information
-			if template, err := m.loadEmbeddedTemplateInfo(tcgPath + "/" + file.Name()); err == nil {
-				if template.Extends != "" {
-					info.Extends = template.Extends
-				}
-				if template.Name != "" {
-					info.DisplayName = template.Name
-				}
-				if template.Description != "" {
-					info.Description = template.Description
-				}
-				if template.Version != "" {
-					info.Version = template.Version
-				}
-			}
-
-			cardstyles = append(cardstyles, *info)
-		}
-	}
-
-	return cardstyles, nil
-}
-
-// loadEmbeddedTemplateInfo loads template metadata from embedded filesystem
-func (m *Manager) loadEmbeddedTemplateInfo(embeddedPath string) (*Template, error) {
-	data, err := builtinTemplates.ReadFile(embeddedPath)
-	if err != nil {
-		return nil, err
-	}
-
-	var template Template
-	if err := yaml.Unmarshal(data, &template); err != nil {
-		return nil, err
-	}
-
-	return &template, nil
-}
-
-// discoverWorkspaceCardstyles finds workspace cardstyles in templates/ directory
-func (m *Manager) discoverWorkspaceCardstyles() ([]CardStyleInfo, error) {
-	var cardstyles []CardStyleInfo
-
-	templatesDir := ".tcg-cardstyles"
-	tcgDirs, err := os.ReadDir(templatesDir)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, tcgDir := range tcgDirs {
-		if !tcgDir.IsDir() {
-			continue
-		}
-
-		tcgName := tcgDir.Name()
-		tcgPath := filepath.Join(templatesDir, tcgName)
-
-		cardstyleFiles, err := os.ReadDir(tcgPath)
-		if err != nil {
-			continue
-		}
-
-		for _, file := range cardstyleFiles {
-			if !strings.HasSuffix(file.Name(), ".yaml") && !strings.HasSuffix(file.Name(), ".yml") {
-				continue
-			}
-
-			styleName := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-			stylePath := filepath.Join(tcgPath, file.Name())
-
-			info, err := m.getCardstyleInfo(stylePath, tcgName, styleName, "workspace")
-			if err == nil {
-				cardstyles = append(cardstyles, *info)
-			}
-		}
-	}
-
-	return cardstyles, nil
-}
-
-// discoverUserCardstyles finds user cardstyles in $HOME/.tcg-cardgen/cardstyles
-func (m *Manager) discoverUserCardstyles() ([]CardStyleInfo, error) {
-	var cardstyles []CardStyleInfo
-
-	if _, err := os.Stat(m.customCardstyleDir); os.IsNotExist(err) {
-		return cardstyles, nil // Directory doesn't exist, return empty list
-	}
-
-	// Check for TCG-specific subdirectories
-	tcgDirs, err := os.ReadDir(m.customCardstyleDir)
-	if err != nil {
-		return nil, err
+		return nil
 	}
 
 	for _, entry := range tcgDirs {
-		if entry.IsDir() {
-			// TCG-specific directory (e.g., mtg/, pokemon/)
-			tcgName := entry.Name()
-			tcgPath := filepath.Join(m.customCardstyleDir, tcgName)
-
-			cardstyleFiles, err := os.ReadDir(tcgPath)
-			if err != nil {
+		if !entry.IsDir() {
+			// Root-level .yaml (TCG from metadata)
+			if !isYAML(entry.Name()) {
 				continue
 			}
-
-			for _, file := range cardstyleFiles {
-				if !strings.HasSuffix(file.Name(), ".yaml") && !strings.HasSuffix(file.Name(), ".yml") {
-					continue
-				}
-
-				styleName := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-				stylePath := filepath.Join(tcgPath, file.Name())
-
-				info, err := m.getCardstyleInfo(stylePath, tcgName, styleName, "user")
-				if err == nil {
-					cardstyles = append(cardstyles, *info)
-				}
-			}
-		} else if strings.HasSuffix(entry.Name(), ".yaml") || strings.HasSuffix(entry.Name(), ".yml") {
-			// Root-level cardstyle file (TCG determined by metadata)
-			styleName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			stylePath := filepath.Join(m.customCardstyleDir, entry.Name())
-
-			// Load template to get TCG from metadata
-			template, err := m.loadTemplateFile(stylePath)
-			if err != nil {
+			path := filepath.Join(root, entry.Name())
+			info := quickInfo(path)
+			if info == nil {
 				continue
 			}
-
-			info, err := m.getCardstyleInfo(stylePath, template.TCG, styleName, "user")
-			if err == nil {
-				cardstyles = append(cardstyles, *info)
+			info.Source = source
+			if source != "embedded" {
+				info.Source = path
 			}
-		}
-	}
-
-	return cardstyles, nil
-}
-
-// discoverLegacyTemplates finds templates in legacy custom template directory
-func (m *Manager) discoverLegacyTemplates() ([]CardStyleInfo, error) {
-	var cardstyles []CardStyleInfo
-
-	tcgDirs, err := os.ReadDir(m.customTemplateDir)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, tcgDir := range tcgDirs {
-		if !tcgDir.IsDir() {
+			out = append(out, *info)
 			continue
 		}
 
-		tcgName := tcgDir.Name()
-		tcgPath := filepath.Join(m.customTemplateDir, tcgName)
-
-		cardstyleFiles, err := os.ReadDir(tcgPath)
+		tcg := entry.Name()
+		tcgPath := filepath.Join(root, tcg)
+		files, err := os.ReadDir(tcgPath)
 		if err != nil {
 			continue
 		}
 
-		for _, file := range cardstyleFiles {
-			if !strings.HasSuffix(file.Name(), ".yaml") && !strings.HasSuffix(file.Name(), ".yml") {
+		for _, file := range files {
+			if file.IsDir() || !isYAML(file.Name()) {
 				continue
 			}
+			path := filepath.Join(tcgPath, file.Name())
+			info := quickInfo(path)
+			if info == nil {
+				continue
+			}
+			if info.TCG == "" {
+				info.TCG = tcg
+			}
+			info.Source = source
+			if source != "embedded" {
+				info.Source = path
+			}
+			out = append(out, *info)
+		}
+	}
+	return out
+}
 
-			styleName := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
-			stylePath := filepath.Join(tcgPath, file.Name())
+func (m *Manager) discoverEmbedded() []types.CardStyleInfo {
+	var out []types.CardStyleInfo
 
-			info, err := m.getCardstyleInfo(stylePath, tcgName, styleName, "legacy")
-			if err == nil {
-				cardstyles = append(cardstyles, *info)
+	tcgDirs, err := builtinTemplates.ReadDir("templates")
+	if err != nil {
+		return nil
+	}
+	for _, tcgDir := range tcgDirs {
+		if !tcgDir.IsDir() {
+			continue
+		}
+		tcg := tcgDir.Name()
+		files, err := builtinTemplates.ReadDir("templates/" + tcg)
+		if err != nil {
+			continue
+		}
+		for _, file := range files {
+			if file.IsDir() || !isYAML(file.Name()) {
+				continue
+			}
+			embedPath := "templates/" + tcg + "/" + file.Name()
+			data, err := builtinTemplates.ReadFile(embedPath)
+			if err != nil {
+				continue
+			}
+			var t Template
+			if err := yaml.Unmarshal(data, &t); err != nil {
+				continue
+			}
+			name := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+			dn := t.Name
+			if dn == "" {
+				dn = strings.ToUpper(tcg) + " " + name
+			}
+			out = append(out, types.CardStyleInfo{
+				TCG:         tcg,
+				Name:        name,
+				DisplayName: dn,
+				Description: t.Description,
+				Version:     t.Version,
+				Source:      "embedded",
+				Extends:     t.Extends,
+			})
+		}
+	}
+	return out
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+func unmarshal(data []byte) (*Template, error) {
+	var t Template
+	if err := yaml.Unmarshal(data, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func quickInfo(path string) *types.CardStyleInfo {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var t Template
+	if err := yaml.Unmarshal(data, &t); err != nil {
+		return nil
+	}
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	dn := t.Name
+	if dn == "" {
+		dn = name
+	}
+	return &types.CardStyleInfo{
+		TCG:         t.TCG,
+		Name:        name,
+		DisplayName: dn,
+		Description: t.Description,
+		Version:     t.Version,
+		Extends:     t.Extends,
+	}
+}
+
+func isYAML(name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return ext == ".yaml" || ext == ".yml"
+}
+
+// hasField checks whether a card has a particular field populated.
+// It checks struct fields by their canonical dot-path name and also looks
+// in the flat Metadata map.
+func hasField(c *card.Card, field string) bool {
+	switch field {
+	case "tcg", "card.tcg":
+		return c.TCG != ""
+	case "cardstyle", "card.cardstyle":
+		return c.CardStyle != ""
+	case "title", "card.title":
+		return c.Title != ""
+	case "card_type", "type", "card.type":
+		return c.Type != ""
+	case "rarity", "card.rarity":
+		return c.Rarity != ""
+	case "set", "card.set":
+		return c.Set != ""
+	case "artist", "card.artist":
+		return c.Artist != ""
+	}
+
+	// Check flat metadata key.
+	if _, ok := c.Metadata[field]; ok {
+		return true
+	}
+
+	// Check nested key (e.g. "mtg.color" -> Metadata["mtg"]["color"]).
+	parts := strings.SplitN(field, ".", 2)
+	if len(parts) == 2 {
+		if section, ok := c.Metadata[parts[0]]; ok {
+			if m, ok := section.(map[string]interface{}); ok {
+				if v, ok := m[parts[1]]; ok {
+					if s, ok := v.(string); ok {
+						return s != ""
+					}
+					return v != nil
+				}
 			}
 		}
 	}
 
-	return cardstyles, nil
-}
-
-// getCardstyleInfo extracts metadata from a cardstyle file
-func (m *Manager) getCardstyleInfo(filePath, tcg, name, source string) (*CardStyleInfo, error) {
-	template, err := m.loadTemplateFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	info := &CardStyleInfo{
-		TCG:         tcg,
-		Name:        name,
-		DisplayName: template.Name,
-		Description: template.Description,
-		Version:     template.Version,
-		Source:      source,
-		Extends:     template.Extends,
-	}
-
-	if source != "built-in" {
-		info.Source = filePath
-	}
-
-	return info, nil
+	return false
 }

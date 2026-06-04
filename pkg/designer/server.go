@@ -1,300 +1,345 @@
+// Package designer provides the embedded HTTP server for the card style designer.
 package designer
 
 import (
-	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
-	"github.com/Merith-TK/tcg-cardgen/pkg/metadata"
+	"github.com/Merith-TK/tcg-cardgen/pkg/card"
 	"github.com/Merith-TK/tcg-cardgen/pkg/renderer"
 	"github.com/Merith-TK/tcg-cardgen/pkg/templates"
 	"github.com/Merith-TK/tcg-cardgen/pkg/types"
+	"gopkg.in/yaml.v3"
+
+	"embed"
 )
 
-// Embed static files into the binary
-//
 //go:embed static/*
 var staticFiles embed.FS
 
-// Server represents the cardstyle designer web server
+// Server is the card style designer HTTP server.
 type Server struct {
-	templateManager *templates.Manager
-	htmlTemplate    *template.Template
+	tmgr *templates.Manager
+	mux  *http.ServeMux
 }
 
-// NewServer creates a new designer server
-func NewServer() (*Server, error) {
-	// Create template manager
-	templateManager := templates.NewManager("")
-
-	// Parse HTML templates
-	htmlTemplate, err := template.ParseFS(staticFiles, "static/*.html")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTML templates: %v", err)
+// New creates a Server ready to serve.
+func New() *Server {
+	s := &Server{
+		tmgr: templates.NewManager(""),
+		mux:  http.NewServeMux(),
 	}
-
-	return &Server{
-		templateManager: templateManager,
-		htmlTemplate:    htmlTemplate,
-	}, nil
+	s.routes()
+	return s
 }
 
-// ServeHTTP implements http.Handler
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Route the request
-	path := r.URL.Path
-
-	switch {
-	case path == "/" || path == "/index.html":
-		s.handleIndex(w, r)
-	case strings.HasPrefix(path, "/api/"):
-		s.handleAPI(w, r)
-	case strings.HasPrefix(path, "/static/"):
-		s.handleStatic(w, r)
-	default:
-		http.NotFound(w, r)
-	}
+	s.mux.ServeHTTP(w, r)
 }
 
-// handleIndex serves the main designer page
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html")
+func (s *Server) routes() {
+	// Static files (including the Preact+HTM app at /).
+	s.mux.HandleFunc("/", s.handleStatic)
 
-	data := struct {
-		Title   string
-		Version string
-	}{
-		Title:   "TCG Cardstyle Designer",
-		Version: "1.0.0",
-	}
-
-	if err := s.htmlTemplate.ExecuteTemplate(w, "index.html", data); err != nil {
-		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
-		return
-	}
+	// API endpoints.
+	s.mux.HandleFunc("/api/templates", withCORS(s.apiListTemplates))
+	s.mux.HandleFunc("/api/template", withCORS(s.apiTemplate))
+	s.mux.HandleFunc("/api/render", withCORS(s.apiRender))
+	s.mux.HandleFunc("/api/export", withCORS(s.apiExport))
 }
 
-// handleStatic serves static files (CSS, JS, images)
+// ─── static file serving ──────────────────────────────────────────────────────
+
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
-	// Remove /static/ prefix and serve from embedded filesystem
-	path := strings.TrimPrefix(r.URL.Path, "/")
+	path := r.URL.Path
+	if path == "/" {
+		path = "/index.html"
+	}
+	// Strip leading slash and prefix with "static".
+	fsPath := "static" + path
 
-	data, err := staticFiles.ReadFile(path)
+	data, err := staticFiles.ReadFile(fsPath)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	// Set content type based on file extension
-	ext := filepath.Ext(path)
-	contentType := getContentType(ext)
-	w.Header().Set("Content-Type", contentType)
-
+	w.Header().Set("Content-Type", contentType(filepath.Ext(path)))
 	w.Write(data)
 }
 
-// handleAPI handles REST API endpoints
-func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
-	// Add CORS headers to allow React frontend to connect
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+// ─── API: list templates ──────────────────────────────────────────────────────
 
-	// Handle preflight requests
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	path := strings.TrimPrefix(r.URL.Path, "/api")
-
-	switch {
-	case path == "/templates" && r.Method == "GET":
-		s.apiListTemplates(w, r)
-	case path == "/template" && r.Method == "GET":
-		s.apiGetTemplate(w, r)
-	case path == "/template" && r.Method == "POST":
-		s.apiSaveTemplate(w, r)
-	case path == "/template/save" && r.Method == "POST":
-		s.apiSaveTemplate(w, r)
-	case path == "/template/export" && r.Method == "POST":
-		s.apiExportTemplate(w, r)
-	case path == "/render" && r.Method == "POST":
-		s.apiRenderCard(w, r)
-	case path == "/preview" && r.Method == "POST":
-		s.apiGeneratePreview(w, r)
-	default:
-		http.Error(w, "API endpoint not found", http.StatusNotFound)
-	}
-}
-
-// apiListTemplates returns all available templates
 func (s *Server) apiListTemplates(w http.ResponseWriter, r *http.Request) {
-	cardstyles, err := s.templateManager.ListAvailableCardstyles()
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to list templates: %v", err), http.StatusInternalServerError)
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Group by TCG for easier frontend consumption
-	grouped := make(map[string][]types.CardStyleInfo)
-	for _, cardstyle := range cardstyles {
-		if grouped[cardstyle.TCG] == nil {
-			grouped[cardstyle.TCG] = make([]types.CardStyleInfo, 0)
-		}
-		grouped[cardstyle.TCG] = append(grouped[cardstyle.TCG], types.CardStyleInfo{
-			TCG:         cardstyle.TCG,
-			Name:        cardstyle.Name,
-			DisplayName: cardstyle.DisplayName,
-			Description: cardstyle.Description,
-			Version:     cardstyle.Version,
-			Source:      cardstyle.Source,
-			Extends:     cardstyle.Extends,
-		})
+	all, err := s.tmgr.ListAvailableCardstyles()
+	if err != nil {
+		jsonError(w, "list templates: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(grouped)
+	// Group by TCG.
+	grouped := make(map[string][]types.CardStyleInfo)
+	for _, cs := range all {
+		grouped[cs.TCG] = append(grouped[cs.TCG], cs)
+	}
+
+	jsonOK(w, grouped)
 }
 
-// apiGetTemplate returns a specific template for editing
+// ─── API: get / save template ─────────────────────────────────────────────────
+
+func (s *Server) apiTemplate(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.apiGetTemplate(w, r)
+	case http.MethodPost:
+		s.apiSaveTemplate(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) apiGetTemplate(w http.ResponseWriter, r *http.Request) {
 	tcg := r.URL.Query().Get("tcg")
-	cardstyle := r.URL.Query().Get("cardstyle")
-
-	if tcg == "" || cardstyle == "" {
-		http.Error(w, "Missing tcg or cardstyle parameter", http.StatusBadRequest)
+	name := r.URL.Query().Get("name")
+	if tcg == "" || name == "" {
+		jsonError(w, "missing tcg or name query parameter", http.StatusBadRequest)
 		return
 	}
 
-	template, err := s.templateManager.LoadTemplate(tcg, cardstyle)
+	t, err := s.tmgr.LoadTemplate(tcg, name)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to load template: %v", err), http.StatusNotFound)
+		jsonError(w, "load template: "+err.Error(), http.StatusNotFound)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(template)
+	jsonOK(w, t)
 }
 
-// apiSaveTemplate saves a template
 func (s *Server) apiSaveTemplate(w http.ResponseWriter, r *http.Request) {
-	var templateData struct {
-		Name   string               `json:"name"`
-		Format templates.Dimensions `json:"format"`
-		Layers []templates.Layer    `json:"layers"`
+	var t templates.Template
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		jsonError(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
 	}
-
-	if err := json.NewDecoder(r.Body).Decode(&templateData); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+	if t.TCG == "" || t.Name == "" {
+		jsonError(w, "template must have tcg and name fields", http.StatusBadRequest)
 		return
 	}
 
-	// For now, just return success - actual saving would go here
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": fmt.Sprintf("Template '%s' saved successfully", templateData.Name),
-	})
-}
-
-// apiRenderCard renders a card and returns the image
-func (s *Server) apiRenderCard(w http.ResponseWriter, r *http.Request) {
-	var requestData struct {
-		Template struct {
-			Name   string               `json:"name"`
-			Format templates.Dimensions `json:"format"`
-			Layers []templates.Layer    `json:"layers"`
-		} `json:"template"`
-		Card map[string]interface{} `json:"card"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&requestData); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid JSON: %v", err), http.StatusBadRequest)
+	// Resolve output path: workspace .tcg-cardstyles/<tcg>/<name>.yaml
+	outDir := filepath.Join(".tcg-cardstyles", t.TCG)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		jsonError(w, "create dir: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	outPath := filepath.Join(outDir, t.Name+".yaml")
 
-	// Convert to proper template structure
-	template := &templates.Template{
-		Name:       requestData.Template.Name,
-		Dimensions: requestData.Template.Format,
-		Layers:     requestData.Template.Layers,
-	}
-
-	// Create renderer
-	rendererInstance := renderer.NewRenderer()
-
-	// Create a simple card with the provided data
-	cardData := map[string]interface{}{}
-	for k, v := range requestData.Card {
-		cardData[k] = v
-	}
-
-	// Create a metadata card from the request data
-	card := &metadata.Card{
-		Metadata: cardData,
-	}
-
-	// Create a temporary file to render to
-	tempFile := fmt.Sprintf("temp_render_%d.png", time.Now().UnixNano())
-
-	// Render the card to temporary file
-	err := rendererInstance.RenderCard(card, template, tempFile)
+	data, err := yaml.Marshal(&t)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to render card: %v", err), http.StatusInternalServerError)
+		jsonError(w, "marshal template: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(outPath, data, 0644); err != nil {
+		jsonError(w, "write file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Read the rendered file
-	imageData, err := os.ReadFile(tempFile)
+	jsonOK(w, map[string]string{"status": "saved", "path": outPath})
+}
+
+// ─── API: render ──────────────────────────────────────────────────────────────
+
+// renderRequest is the JSON body for POST /api/render
+type renderRequest struct {
+	// Inline card frontmatter fields — same as a .md file's YAML block.
+	Card map[string]interface{} `json:"card"`
+	// Template can be a TCG/name reference or an inline template object.
+	TemplateTCG  string             `json:"template_tcg"`
+	TemplateName string             `json:"template_name"`
+	Template     *templates.Template `json:"template,omitempty"`
+}
+
+func (s *Server) apiRender(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req renderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Build card from the provided map.
+	c := buildCardFromMap(req.Card)
+
+	// Resolve template.
+	var t *templates.Template
+	var err error
+	if req.Template != nil {
+		t = req.Template
+	} else {
+		tcg := req.TemplateTCG
+		name := req.TemplateName
+		if tcg == "" {
+			tcg = c.TCG
+		}
+		if name == "" {
+			name = c.CardStyle
+		}
+		t, err = s.tmgr.LoadTemplate(tcg, name)
+		if err != nil {
+			jsonError(w, "load template: "+err.Error(), http.StatusNotFound)
+			return
+		}
+	}
+
+	// Render to a temp file then read it back.
+	tmp, err := os.CreateTemp("", "tcg-render-*.png")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to read rendered image: %v", err), http.StatusInternalServerError)
+		jsonError(w, "create temp: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+
+	if err := renderer.RenderCard(c, t, tmp.Name()); err != nil {
+		jsonError(w, "render: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Clean up temp file
-	os.Remove(tempFile)
+	imgData, err := os.ReadFile(tmp.Name())
+	if err != nil {
+		jsonError(w, "read render: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
-	// Return the image
-	w.Header().Set("Content-Type", "image/png")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s.png\"", requestData.Template.Name))
-	w.Write(imageData)
+	// Accept header: return raw PNG or base64 JSON.
+	if strings.Contains(r.Header.Get("Accept"), "image/png") {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(imgData)
+	} else {
+		jsonOK(w, map[string]string{
+			"image": "data:image/png;base64," + base64.StdEncoding.EncodeToString(imgData),
+		})
+	}
 }
 
-// apiExportTemplate exports a template as YAML (placeholder for now)
-func (s *Server) apiExportTemplate(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement template export
+// ─── API: export ──────────────────────────────────────────────────────────────
+
+func (s *Server) apiExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var t templates.Template
+	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
+		jsonError(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	data, err := yaml.Marshal(&t)
+	if err != nil {
+		jsonError(w, "marshal: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	name := t.Name
+	if name == "" {
+		name = "template"
+	}
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.yaml"`, name))
+	w.Write(data)
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+func buildCardFromMap(m map[string]interface{}) *card.Card {
+	c := &card.Card{
+		Metadata: m,
+	}
+	// Pull well-known fields if present.
+	if v, ok := m["tcg"].(string); ok {
+		c.TCG = v
+	}
+	if v, ok := m["cardstyle"].(string); ok {
+		c.CardStyle = v
+	}
+	if v, ok := m["title"].(string); ok {
+		c.Title = v
+	}
+	if v, ok := m["rarity"].(string); ok {
+		c.Rarity = v
+	}
+	if v, ok := m["set"].(string); ok {
+		c.Set = v
+	}
+	if v, ok := m["artist"].(string); ok {
+		c.Artist = v
+	}
+	if v, ok := m["rules_text"].(string); ok {
+		c.RulesText = v
+	}
+	if v, ok := m["flavor_text"].(string); ok {
+		c.FlavorText = v
+	}
+	// Apply defaults.
+	if c.TCG == "" {
+		c.TCG = "mtg"
+	}
+	if c.CardStyle == "" {
+		c.CardStyle = "basic"
+	}
+	if c.Title == "" {
+		c.Title = "Preview Card"
+	}
+	return c
+}
+
+func withCORS(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		h(w, r)
+	}
+}
+
+func jsonOK(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Template export not yet implemented",
-	})
+	_ = json.NewEncoder(w).Encode(v)
 }
 
-// apiGeneratePreview generates a preview image (placeholder for now)
-func (s *Server) apiGeneratePreview(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement preview generation
+func jsonError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "success",
-		"message": "Preview generation not yet implemented",
-	})
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// getContentType returns the appropriate content type for a file extension
-func getContentType(ext string) string {
-	switch ext {
+func contentType(ext string) string {
+	switch strings.ToLower(ext) {
 	case ".html":
-		return "text/html"
+		return "text/html; charset=utf-8"
 	case ".css":
 		return "text/css"
-	case ".js":
+	case ".js", ".mjs":
 		return "application/javascript"
 	case ".json":
 		return "application/json"
@@ -302,8 +347,6 @@ func getContentType(ext string) string {
 		return "image/png"
 	case ".jpg", ".jpeg":
 		return "image/jpeg"
-	case ".gif":
-		return "image/gif"
 	case ".svg":
 		return "image/svg+xml"
 	case ".ico":
@@ -312,3 +355,5 @@ func getContentType(ext string) string {
 		return "application/octet-stream"
 	}
 }
+
+
