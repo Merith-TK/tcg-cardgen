@@ -3,7 +3,9 @@ package renderer
 
 import (
 	"fmt"
+	"image"
 	"image/color"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -108,6 +110,11 @@ func renderTextLayer(dc *gg.Context, layer types.Layer, proc *expr.Processor, va
 	}
 
 	if layer.IconReplace {
+		content = proc.Substitute(content) // second pass to resolve icon paths
+		// If all space-separated tokens look like image paths, render as icon strip.
+		if renderIconStrip(dc, layer, content) {
+			return nil
+		}
 		content = processIconReplacements(content, t, proc)
 	}
 
@@ -167,6 +174,68 @@ func processIconReplacements(content string, t *templates.Template, proc *expr.P
 	return result
 }
 
+// renderIconStrip renders a space-separated list of image paths as a horizontal icon strip.
+// Returns true if all tokens resolved to valid image files and were rendered.
+func renderIconStrip(dc *gg.Context, layer types.Layer, content string) bool {
+	tokens := strings.Fields(content)
+	if len(tokens) == 0 {
+		return false
+	}
+	// Verify every token is an existing image file.
+	for _, tok := range tokens {
+		if _, err := os.Stat(tok); err != nil {
+			return false
+		}
+	}
+
+	x := float64(layer.Region.X)
+	y := float64(layer.Region.Y)
+	h := float64(layer.Region.Height)
+	size := h // icon height = region height; width proportional
+	// Right-align: start from right edge and place icons right-to-left.
+	rx := float64(layer.Region.X+layer.Region.Width) - size
+	align := "right"
+	if layer.Align != "" {
+		align = layer.Align
+	}
+
+	// Load images first to get dimensions.
+	imgs := make([]image.Image, 0, len(tokens))
+	for _, tok := range tokens {
+		img, err := loadImage(tok)
+		if err != nil {
+			return false
+		}
+		imgs = append(imgs, img)
+	}
+
+	switch align {
+	case "right":
+		// Place right-to-left.
+		cursor := rx + size
+		for i := len(imgs) - 1; i >= 0; i-- {
+			cursor -= size
+			dc.DrawImageAnchored(imgs[i], int(cursor+size/2), int(y+size/2),
+				0.5, 0.5)
+		}
+	case "center":
+		totalW := size * float64(len(imgs))
+		cx := float64(layer.Region.X) + float64(layer.Region.Width)/2
+		cursor := cx - totalW/2
+		for _, img := range imgs {
+			dc.DrawImageAnchored(img, int(cursor+size/2), int(y+size/2), 0.5, 0.5)
+			cursor += size
+		}
+	default: // left
+		cursor := x
+		for _, img := range imgs {
+			dc.DrawImageAnchored(img, int(cursor+size/2), int(y+size/2), 0.5, 0.5)
+			cursor += size
+		}
+	}
+	return true
+}
+
 // buildVars constructs the full variable map for a card/template pair.
 func buildVars(c *card.Card, t *templates.Template) map[string]string {
 	vars := make(map[string]string, 64)
@@ -190,14 +259,42 @@ func buildVars(c *card.Card, t *templates.Template) map[string]string {
 	// Flatten metadata map recursively (one level of nesting).
 	flattenMeta(vars, c.Metadata, "")
 
+	// Bridge tcg-specific mana_cost into card.mana_cost when the body blockquote
+	// didn't provide one (e.g. mtg.mana_cost: ["{{mtg.mana_red}}"] in YAML front-matter).
+	if vars["card.mana_cost"] == "" {
+		if mc, ok := vars[c.TCG+".mana_cost"]; ok && mc != "" {
+			vars["card.mana_cost"] = mc
+		}
+	}
+
 	// Style tokens (accessible as style_tokens.key).
 	for k, v := range t.StyleTokens {
 		vars["style_tokens."+k] = v
 	}
 
-	// Optional field defaults.
+	// Optional field defaults — only applied when the var is not already set
+	// (or is empty), and null YAML values are skipped entirely.
 	for k, v := range t.Optional {
-		vars[k] = fmt.Sprintf("%v", v)
+		if v == nil {
+			// YAML null → skip; don't let it become the string "<nil>"
+			continue
+		}
+		s := fmt.Sprintf("%v", v)
+		if existing, ok := vars[k]; ok && existing != "" {
+			continue // card data already provided this value
+		}
+		vars[k] = s
+	}
+
+	// Second pass: resolve any {{...}} expressions inside variable values.
+	// This handles optional_field defaults like "{{mtg.cost_colorless(0)}}"
+	// which reference other vars.  We use a single substitution pass so that
+	// circular references don't loop.
+	proc := expr.New(vars)
+	for k, v := range vars {
+		if strings.Contains(v, "{{") {
+			vars[k] = proc.Substitute(v)
+		}
 	}
 
 	// Template directory paths.
@@ -223,6 +320,15 @@ func flattenMeta(vars map[string]string, m map[string]interface{}, prefix string
 			vars[fullKey] = fmt.Sprintf("%d", val)
 		case float64:
 			vars[fullKey] = fmt.Sprintf("%g", val)
+		case []interface{}:
+			// Join slice elements with a space (e.g. mana_cost: ["{{R}}", "{{G}}"] → "{{R}} {{G}}")
+			parts := make([]string, 0, len(val))
+			for _, item := range val {
+				if item != nil {
+					parts = append(parts, fmt.Sprintf("%v", item))
+				}
+			}
+			vars[fullKey] = strings.Join(parts, " ")
 		default:
 			if val != nil {
 				vars[fullKey] = fmt.Sprintf("%v", val)
